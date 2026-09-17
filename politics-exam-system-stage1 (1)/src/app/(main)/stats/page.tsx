@@ -1,0 +1,1 @@
+import { PageHeading } from "@/components/page-heading"; import { ComingSoon } from "@/components/coming-soon"; export default function Page(){return <><PageHeading title="学习统计" description="按题型和章节了解准确率与薄弱点。"/><ComingSoon title="统计图表将在第三阶段启用"/></>}

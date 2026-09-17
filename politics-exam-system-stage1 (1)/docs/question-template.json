@@ -1,0 +1,28 @@
+{
+  "source": {
+    "pdfImportId": "import_xxx",
+    "fileName": "2020年成人高考政治考题.pdf",
+    "year": 2020,
+    "pageNumbers": [1],
+    "originalQuestionNumber": "1",
+    "rawOcrText": "OCR 原始文字"
+  },
+  "type": "SINGLE_CHOICE",
+  "stem": "题干内容",
+  "options": [
+    { "id": "A", "text": "选项 A" },
+    { "id": "B", "text": "选项 B" },
+    { "id": "C", "text": "选项 C" },
+    { "id": "D", "text": "选项 D" }
+  ],
+  "answer": { "optionIds": ["A"] },
+  "explanation": "答案解析",
+  "chapter": "章节",
+  "knowledgePoint": "知识点",
+  "difficulty": "MEDIUM",
+  "defaultScore": 2,
+  "tags": ["历年真题", "2020年"],
+  "scoringRule": { "mode": "EXACT_MATCH" },
+  "reviewStatus": "PENDING_REVIEW",
+  "ocrConfidence": 0.92
+}

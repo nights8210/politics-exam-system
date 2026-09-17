@@ -1,0 +1,1 @@
+import { PageHeading } from "@/components/page-heading"; import { ComingSoon } from "@/components/coming-soon"; export default function Page(){return <><PageHeading title="设置" description="管理评分、错题掌握和组卷默认规则。"/><ComingSoon title="系统设置将在第二阶段启用"/></>}

@@ -1,0 +1,18 @@
+@import "tailwindcss";
+:root { --background:#f5f7fa; --foreground:#18202b; --surface:#fff; --line:#e5e9ef; --primary:#b4232d; --primary-dark:#891a23; }
+* { box-sizing:border-box; }
+html { background:var(--background); }
+body { margin:0; background:var(--background); color:var(--foreground); font-family:"Noto Sans SC","Microsoft YaHei","PingFang SC",system-ui,sans-serif; }
+button,input,select,textarea { font:inherit; }
+button,a { -webkit-tap-highlight-color:transparent; }
+.card { border:1px solid var(--line); border-radius:1rem; background:var(--surface); box-shadow:0 1px 2px rgb(16 24 40 / 4%); }
+.field { width:100%; min-height:2.75rem; border:1px solid #d7dde5; border-radius:.7rem; background:white; padding:.65rem .8rem; color:var(--foreground); }
+.field:focus { border-color:var(--primary); outline:3px solid rgb(180 35 45 / 10%); }
+.btn-primary,.btn-secondary,.btn-danger { display:inline-flex; min-height:2.75rem; align-items:center; justify-content:center; gap:.5rem; border-radius:.7rem; padding:.65rem 1rem; font-weight:650; transition:150ms ease; cursor:pointer; }
+.btn-primary { border:1px solid var(--primary); background:var(--primary); color:white; }
+.btn-primary:hover { background:var(--primary-dark); }
+.btn-secondary { border:1px solid #d7dde5; background:white; color:#344054; }
+.btn-secondary:hover { background:#f8fafc; }
+.btn-danger { border:1px solid #ffd1d6; background:#fff3f4; color:#a61b29; }
+.btn-primary:disabled,.btn-secondary:disabled { cursor:not-allowed; opacity:.55; }
+@media (max-width:767px) { .desktop-only { display:none !important; } }

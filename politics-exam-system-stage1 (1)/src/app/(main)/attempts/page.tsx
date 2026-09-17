@@ -1,0 +1,1 @@
+import { PageHeading } from "@/components/page-heading"; import { ComingSoon } from "@/components/coming-soon"; export default function Page(){return <><PageHeading title="考试记录" description="查看每次考试的分数、准确率与试卷快照。"/><ComingSoon title="考试记录将在第二阶段启用"/></>}

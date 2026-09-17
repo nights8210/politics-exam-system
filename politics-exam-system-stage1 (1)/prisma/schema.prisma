@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String          @id @default(cuid())
+  authId         String          @unique
+  email          String          @unique
+  name           String?
+  role           String          @default("USER")
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  imports        PdfImport[]
+  exams          Exam[]
+  attempts       ExamAttempt[]
+  wrongQuestions WrongQuestion[]
+}
+
+model PdfImport {
+  id                String     @id @default(cuid())
+  importedById      String
+  originalFilename  String
+  storageKey        String
+  fileHash          String
+  pageCount         Int?
+  requiresOcr       Boolean    @default(false)
+  status            String     @default("UPLOADED")
+  totalQuestions    Int        @default(0)
+  reviewedQuestions Int        @default(0)
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  completedAt       DateTime?
+  importedBy        User       @relation(fields: [importedById], references: [id])
+  questions         Question[]
+
+  @@index([importedById])
+  @@index([status])
+  @@index([fileHash])
+}
+
+model Question {
+  id                     String          @id @default(cuid())
+  pdfImportId            String?
+  originalQuestionNumber String?
+  type                   String
+  stem                   String
+  options                Json?
+  answer                 Json
+  scoringRule            Json?
+  explanation            String?
+  chapter                String?
+  knowledgePoint         String?
+  difficulty             String          @default("MEDIUM")
+  defaultScore           Decimal         @default(1)
+  sourcePdf              String?
+  sourcePages            Json?
+  rawOcrText             String?
+  ocrConfidence          Float?
+  contentHash            String?
+  reviewStatus           String          @default("PENDING_REVIEW")
+  isActive               Boolean         @default(true)
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  deletedAt              DateTime?
+  pdfImport              PdfImport?      @relation(fields: [pdfImportId], references: [id])
+  examQuestions          ExamQuestion[]
+  attemptAnswers         AttemptAnswer[]
+  wrongQuestions         WrongQuestion[]
+  tags                   QuestionTag[]
+
+  @@index([type])
+  @@index([chapter])
+  @@index([difficulty])
+  @@index([reviewStatus])
+  @@index([contentHash])
+  @@index([pdfImportId, originalQuestionNumber])
+}
+
+model Exam {
+  id               String          @id @default(cuid())
+  userId           String
+  title            String
+  totalScore       Decimal
+  durationMinutes  Int
+  questionCount    Int
+  generationConfig Json
+  generatedAt      DateTime        @default(now())
+  status           String          @default("READY")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id])
+  questions        ExamQuestion[]
+  attempts         ExamAttempt[]
+
+  @@index([userId, generatedAt])
+  @@index([status])
+}
+
+model ExamQuestion {
+  id                    String          @id @default(cuid())
+  examId                String
+  questionId            String?
+  questionSnapshot      Json
+  optionsOrder          Json?
+  correctAnswerSnapshot Json
+  score                 Decimal
+  sortOrder             Int
+  createdAt             DateTime        @default(now())
+  exam                  Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question              Question?       @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  attemptAnswers        AttemptAnswer[]
+
+  @@unique([examId, sortOrder])
+  @@index([examId])
+  @@index([questionId])
+}
+
+model ExamAttempt {
+  id              String          @id @default(cuid())
+  examId          String
+  userId          String
+  startedAt       DateTime        @default(now())
+  submittedAt     DateTime?
+  durationSeconds Int?
+  score           Decimal         @default(0)
+  totalScore      Decimal
+  accuracy        Decimal         @default(0)
+  correctCount    Int             @default(0)
+  wrongCount      Int             @default(0)
+  unansweredCount Int             @default(0)
+  status          String          @default("IN_PROGRESS")
+  gradingStatus   String          @default("NOT_GRADED")
+  syncVersion     Int             @default(1)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  exam            Exam            @relation(fields: [examId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
+  answers         AttemptAnswer[]
+
+  @@unique([examId, userId])
+  @@index([userId, startedAt])
+  @@index([status])
+}
+
+model AttemptAnswer {
+  id               String        @id @default(cuid())
+  attemptId        String
+  examQuestionId   String
+  questionId       String?
+  userAnswer       Json?
+  correctAnswer    Json
+  isCorrect        Boolean?
+  awardedScore     Decimal       @default(0)
+  maxScore         Decimal
+  timeSpentSeconds Int           @default(0)
+  gradingStatus    String        @default("PENDING")
+  graderComment    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  attempt          ExamAttempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examQuestion     ExamQuestion  @relation(fields: [examQuestionId], references: [id])
+  question         Question?     @relation(fields: [questionId], references: [id], onDelete: SetNull)
+
+  @@unique([attemptId, examQuestionId])
+  @@index([questionId])
+}
+
+model WrongQuestion {
+  id                 String    @id @default(cuid())
+  userId             String
+  questionId         String
+  wrongCount         Int       @default(0)
+  correctCount       Int       @default(0)
+  consecutiveCorrect Int       @default(0)
+  lastWrongAt        DateTime?
+  lastCorrectAt      DateTime?
+  mastered           Boolean   @default(false)
+  masteredAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               User      @relation(fields: [userId], references: [id])
+  question           Question  @relation(fields: [questionId], references: [id])
+
+  @@unique([userId, questionId])
+  @@index([userId, mastered])
+  @@index([userId, wrongCount])
+}
+
+model Tag {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  createdAt DateTime      @default(now())
+  questions QuestionTag[]
+}
+
+model QuestionTag {
+  questionId String
+  tagId      String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, tagId])
+  @@index([tagId])
+}

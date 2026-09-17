@@ -1,0 +1,1 @@
+import { PageHeading } from "@/components/page-heading"; import { ComingSoon } from "@/components/coming-soon"; export default function Page(){return <><PageHeading title="生成随机试卷" description="选择题型、章节、难度、分值和考试时长。"/><ComingSoon title="随机组卷将在第二阶段启用"/></>}
