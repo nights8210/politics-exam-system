@@ -49,33 +49,44 @@ model PdfImport {
 model Question {
   id                     String          @id @default(cuid())
   pdfImportId            String?
+
+  year                   Int?
   originalQuestionNumber String?
+
   type                   String
   stem                   String
   options                Json?
   answer                 Json
   scoringRule            Json?
   explanation            String?
+
   chapter                String?
   knowledgePoint         String?
   difficulty             String          @default("MEDIUM")
   defaultScore           Decimal         @default(1)
+
+  sourceTitle            String?
   sourcePdf              String?
   sourcePages            Json?
+
   rawOcrText             String?
   ocrConfidence          Float?
   contentHash            String?
+
   reviewStatus           String          @default("PENDING_REVIEW")
   isActive               Boolean         @default(true)
+
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
   deletedAt              DateTime?
+
   pdfImport              PdfImport?      @relation(fields: [pdfImportId], references: [id])
   examQuestions          ExamQuestion[]
   attemptAnswers         AttemptAnswer[]
   wrongQuestions         WrongQuestion[]
   tags                   QuestionTag[]
 
+  @@index([year])
   @@index([type])
   @@index([chapter])
   @@index([difficulty])
