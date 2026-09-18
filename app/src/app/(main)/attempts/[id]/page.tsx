@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CheckCircle2, XCircle, CircleMinus } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -9,7 +12,9 @@ export const metadata = {
   title: "考试结果",
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
+function asRecord(
+  value: unknown
+): Record<string, unknown> {
   if (
     value &&
     typeof value === "object" &&
@@ -22,7 +27,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function getAnswerText(value: unknown): string {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "—";
   }
 
@@ -39,7 +47,9 @@ function getAnswerText(value: unknown): string {
   }
 
   if (Array.isArray(value)) {
-    return value.map(getAnswerText).join("、");
+    return value
+      .map(getAnswerText)
+      .join("、");
   }
 
   const record = asRecord(value);
@@ -49,11 +59,15 @@ function getAnswerText(value: unknown): string {
   }
 
   if (record.correct !== undefined) {
-    return getAnswerText(record.correct);
+    return getAnswerText(
+      record.correct
+    );
   }
 
   if (record.answer !== undefined) {
-    return getAnswerText(record.answer);
+    return getAnswerText(
+      record.answer
+    );
   }
 
   if (record.text !== undefined) {
@@ -67,14 +81,80 @@ function getAnswerText(value: unknown): string {
   }
 }
 
+/*
+ * 把 A / B / C / D
+ * 转换成：
+ * A. 具体选项内容
+ */
+function getChoiceAnswerText(
+  answerValue: unknown,
+  optionsValue: unknown
+): string {
+  const answerKey =
+    getAnswerText(answerValue).trim();
+
+  if (
+    !answerKey ||
+    answerKey === "—"
+  ) {
+    return "—";
+  }
+
+  const options =
+    asRecord(optionsValue);
+
+  /*
+   * 普通结构：
+   * {
+   *   A: "...",
+   *   B: "...",
+   *   C: "...",
+   *   D: "..."
+   * }
+   */
+  const directText =
+    options[answerKey];
+
+  if (
+    typeof directText === "string"
+  ) {
+    return `${answerKey}. ${directText}`;
+  }
+
+  /*
+   * 兼容小写答案
+   */
+  const upperKey =
+    answerKey.toUpperCase();
+
+  const upperText =
+    options[upperKey];
+
+  if (
+    typeof upperText === "string"
+  ) {
+    return `${upperKey}. ${upperText}`;
+  }
+
+  /*
+   * 如果找不到选项内容，
+   * 至少仍然显示 A/B/C/D
+   */
+  return answerKey;
+}
+
 function getTypeName(type: string) {
-  const names: Record<string, string> = {
+  const names: Record<
+    string,
+    string
+  > = {
     SINGLE_CHOICE: "单选题",
     MULTIPLE_CHOICE: "多选题",
     TRUE_FALSE: "判断题",
     JUDGMENT: "辨析题",
     SHORT_ANSWER: "简答题",
-    MATERIAL_ANALYSIS: "材料分析题",
+    MATERIAL_ANALYSIS:
+      "材料分析题",
     ESSAY: "论述题",
   };
 
@@ -84,92 +164,121 @@ function getTypeName(type: string) {
 export default async function AttemptResultPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{
+    id: string;
+  }>;
 }) {
   const user = await requireUser();
+
   const { id } = await params;
 
-  const attempt = await db.examAttempt.findFirst({
-    where: {
-      id,
-      userId: user.id,
-    },
+  const attempt =
+    await db.examAttempt.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
 
-    include: {
-      exam: true,
+      include: {
+        exam: true,
 
-      answers: {
-        include: {
-          examQuestion: true,
+        answers: {
+          include: {
+            examQuestion: true,
+          },
         },
       },
-    },
-  });
+    });
 
   if (!attempt) {
     notFound();
   }
 
-  const answers = [...attempt.answers].sort(
+  const answers = [
+    ...attempt.answers,
+  ].sort(
     (a, b) =>
       a.examQuestion.sortOrder -
       b.examQuestion.sortOrder
   );
 
-  const objectiveAnswers = answers.filter((answer) => {
-    const snapshot = asRecord(
-      answer.examQuestion.questionSnapshot
-    );
-
-    const type =
-      typeof snapshot.type === "string"
-        ? snapshot.type
-        : "";
-
-    return (
-      type === "SINGLE_CHOICE" ||
-      type === "MULTIPLE_CHOICE" ||
-      type === "TRUE_FALSE"
-    );
-  });
-
-  const subjectiveAnswers = answers.filter((answer) => {
-    const snapshot = asRecord(
-      answer.examQuestion.questionSnapshot
-    );
-
-    const type =
-      typeof snapshot.type === "string"
-        ? snapshot.type
-        : "";
-
-    return ![
-      "SINGLE_CHOICE",
-      "MULTIPLE_CHOICE",
-      "TRUE_FALSE",
-    ].includes(type);
-  });
-
-  const correctCount = objectiveAnswers.filter(
-    (answer) => answer.isCorrect === true
-  ).length;
-
-  const wrongCount = objectiveAnswers.filter(
-    (answer) => answer.isCorrect === false
-  ).length;
-
-  const choiceAnsweredCount = objectiveAnswers.filter(
-    (answer) => {
-      const text = getAnswerText(
-        answer.userAnswer
+  /*
+   * 客观题
+   */
+  const objectiveAnswers =
+    answers.filter((answer) => {
+      const snapshot = asRecord(
+        answer.examQuestion
+          .questionSnapshot
       );
 
-      return text !== "—" && text.trim() !== "";
-    }
-  ).length;
+      const type =
+        typeof snapshot.type ===
+        "string"
+          ? snapshot.type
+          : "";
+
+      return (
+        type === "SINGLE_CHOICE" ||
+        type ===
+          "MULTIPLE_CHOICE" ||
+        type === "TRUE_FALSE"
+      );
+    });
+
+  /*
+   * 主观题
+   */
+  const subjectiveAnswers =
+    answers.filter((answer) => {
+      const snapshot = asRecord(
+        answer.examQuestion
+          .questionSnapshot
+      );
+
+      const type =
+        typeof snapshot.type ===
+        "string"
+          ? snapshot.type
+          : "";
+
+      return ![
+        "SINGLE_CHOICE",
+        "MULTIPLE_CHOICE",
+        "TRUE_FALSE",
+      ].includes(type);
+    });
+
+  const correctCount =
+    objectiveAnswers.filter(
+      (answer) =>
+        answer.isCorrect === true
+    ).length;
+
+  const wrongCount =
+    objectiveAnswers.filter(
+      (answer) =>
+        answer.isCorrect === false
+    ).length;
+
+  const choiceAnsweredCount =
+    objectiveAnswers.filter(
+      (answer) => {
+        const text =
+          getAnswerText(
+            answer.userAnswer
+          );
+
+        return (
+          text !== "—" &&
+          text.trim() !== ""
+        );
+      }
+    ).length;
 
   const unansweredChoiceCount =
-    objectiveAnswers.length - choiceAnsweredCount;
+    objectiveAnswers.length -
+    choiceAnsweredCount;
 
   const accuracy =
     objectiveAnswers.length > 0
@@ -180,21 +289,27 @@ export default async function AttemptResultPage({
         )
       : 0;
 
-  const objectiveScore = objectiveAnswers.reduce(
-    (sum, answer) =>
-      sum + Number(answer.awardedScore),
-    0
-  );
+  const objectiveScore =
+    objectiveAnswers.reduce(
+      (sum, answer) =>
+        sum +
+        Number(
+          answer.awardedScore
+        ),
+      0
+    );
 
   const objectiveTotalScore =
     objectiveAnswers.reduce(
       (sum, answer) =>
-        sum + Number(answer.maxScore),
+        sum +
+        Number(answer.maxScore),
       0
     );
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      {/* 顶部成绩概要 */}
       <div className="card p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
@@ -212,7 +327,8 @@ export default async function AttemptResultPage({
                 {attempt.submittedAt.toLocaleString(
                   "zh-CN",
                   {
-                    timeZone: "Asia/Hong_Kong",
+                    timeZone:
+                      "Asia/Hong_Kong",
                   }
                 )}
               </p>
@@ -231,6 +347,7 @@ export default async function AttemptResultPage({
         </div>
       </div>
 
+      {/* 成绩统计 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-5">
           <p className="text-sm text-slate-500">
@@ -273,6 +390,7 @@ export default async function AttemptResultPage({
         </div>
       </div>
 
+      {/* 选择题分数 */}
       <div className="card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -298,13 +416,15 @@ export default async function AttemptResultPage({
         </div>
       </div>
 
+      {/* 选择题详情 */}
       <div className="space-y-4">
         {objectiveAnswers.map(
           (answer, index) => {
-            const snapshot = asRecord(
-              answer.examQuestion
-                .questionSnapshot
-            );
+            const snapshot =
+              asRecord(
+                answer.examQuestion
+                  .questionSnapshot
+              );
 
             const type =
               typeof snapshot.type ===
@@ -330,14 +450,24 @@ export default async function AttemptResultPage({
                 ? snapshot.originalQuestionNumber
                 : null;
 
+            /*
+             * 关键修改：
+             * 从 questionSnapshot.options
+             * 读取完整选项文字
+             */
+            const options =
+              snapshot.options;
+
             const userAnswer =
-              getAnswerText(
-                answer.userAnswer
+              getChoiceAnswerText(
+                answer.userAnswer,
+                options
               );
 
             const correctAnswer =
-              getAnswerText(
-                answer.correctAnswer
+              getChoiceAnswerText(
+                answer.correctAnswer,
+                options
               );
 
             return (
@@ -349,9 +479,12 @@ export default async function AttemptResultPage({
                     : "border-l-red-500"
                 }`}
               >
+                {/* 题目信息 */}
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
-                    {getTypeName(type)}
+                    {getTypeName(
+                      type
+                    )}
                   </span>
 
                   {year && (
@@ -363,37 +496,58 @@ export default async function AttemptResultPage({
                   {originalNumber && (
                     <span className="text-slate-400">
                       原题第
-                      {originalNumber}题
+                      {originalNumber}
+                      题
                     </span>
                   )}
 
                   <span className="ml-auto">
                     {answer.isCorrect ? (
                       <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
-                        <CheckCircle2 size={16} />
+                        <CheckCircle2
+                          size={16}
+                        />
                         正确
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 font-medium text-red-600">
-                        <XCircle size={16} />
+                        <XCircle
+                          size={16}
+                        />
                         错误
                       </span>
                     )}
                   </span>
                 </div>
 
+                {/* 题干 */}
                 <p className="font-medium leading-7 text-slate-900">
-                  {index + 1}. {stem}
+                  {index + 1}.{" "}
+                  {stem}
                 </p>
 
+                {/* 答案 */}
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">
+                  {/* 我的答案 */}
+                  <div
+                    className={`rounded-xl p-4 ${
+                      answer.isCorrect
+                        ? "bg-emerald-50"
+                        : "bg-red-50"
+                    }`}
+                  >
+                    <p
+                      className={`text-xs ${
+                        answer.isCorrect
+                          ? "text-emerald-600"
+                          : "text-red-500"
+                      }`}
+                    >
                       你的答案
                     </p>
 
                     <p
-                      className={`mt-1 font-semibold ${
+                      className={`mt-2 font-semibold leading-6 ${
                         answer.isCorrect
                           ? "text-emerald-700"
                           : "text-red-700"
@@ -403,12 +557,13 @@ export default async function AttemptResultPage({
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-emerald-50 p-3">
+                  {/* 正确答案 */}
+                  <div className="rounded-xl bg-emerald-50 p-4">
                     <p className="text-xs text-emerald-600">
                       正确答案
                     </p>
 
-                    <p className="mt-1 font-semibold text-emerald-700">
+                    <p className="mt-2 font-semibold leading-6 text-emerald-700">
                       {correctAnswer}
                     </p>
                   </div>
@@ -419,7 +574,9 @@ export default async function AttemptResultPage({
         )}
       </div>
 
-      {subjectiveAnswers.length > 0 && (
+      {/* 主观题 */}
+      {subjectiveAnswers.length >
+        0 && (
         <div className="card p-6">
           <div className="mb-5">
             <h2 className="font-semibold text-slate-900">
@@ -458,7 +615,9 @@ export default async function AttemptResultPage({
                     className="rounded-xl border border-slate-200 p-4"
                   >
                     <span className="text-xs font-medium text-slate-500">
-                      {getTypeName(type)}
+                      {getTypeName(
+                        type
+                      )}
                     </span>
 
                     <p className="mt-2 font-medium leading-7 text-slate-900">
@@ -496,6 +655,7 @@ export default async function AttemptResultPage({
         </div>
       )}
 
+      {/* 底部按钮 */}
       <div className="flex flex-wrap gap-3 pb-8">
         <Link
           href="/exams/generate"
