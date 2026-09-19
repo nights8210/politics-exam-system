@@ -35,6 +35,9 @@ type GenerateExamBody = {
   shuffleOptions?: boolean;
 };
 
+/*
+ * 随机打乱数组
+ */
 function shuffleArray<T>(
   items: T[]
 ): T[] {
@@ -58,6 +61,93 @@ function shuffleArray<T>(
   return result;
 }
 
+/*
+ * 标准化题干：
+ * 用于判断不同年份是否出现了同一道题。
+ *
+ * 去除：
+ * - 空格
+ * - 换行
+ * - 常见标点
+ * - 全角/半角差异
+ */
+function normalizeStem(
+  stem: string
+): string {
+  return stem
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(
+      /[，。！？；：、“”‘’（）()【】[\]《》〈〉,.!?;:'"`·—\-_/\\]/g,
+      ""
+    )
+    .trim();
+}
+
+/*
+ * 题目唯一键
+ *
+ * 如果数据库已有 contentHash，
+ * 优先使用 contentHash。
+ *
+ * 没有 contentHash 时，
+ * 使用：题型 + 标准化题干。
+ */
+function getQuestionKey(
+  question: {
+    type: string;
+    stem: string;
+    contentHash?: string | null;
+  }
+): string {
+  if (
+    question.contentHash &&
+    question.contentHash.trim()
+  ) {
+    return `hash:${question.contentHash.trim()}`;
+  }
+
+  return `${question.type}:${normalizeStem(
+    question.stem
+  )}`;
+}
+
+/*
+ * 删除重复题
+ */
+function dedupeQuestions<
+  T extends {
+    type: string;
+    stem: string;
+    contentHash?: string | null;
+  }
+>(
+  questions: T[]
+): T[] {
+  const seen =
+    new Set<string>();
+
+  const result: T[] = [];
+
+  for (const question of questions) {
+    const key =
+      getQuestionKey(question);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(question);
+  }
+
+  return result;
+}
+
+/*
+ * 选择题选项顺序
+ */
 function getOptionOrder(
   options: Prisma.JsonValue | null,
   shouldShuffle: boolean
@@ -107,20 +197,24 @@ export async function POST(
     const body =
       (await req.json()) as GenerateExamBody;
 
+    /*
+     * 年份
+     * 不再写死 2018 / 2019 / 2020
+     */
     const years = Array.from(
-  new Set(
-    (body.years ?? [])
-      .map(Number)
-      .filter(
-        (year) =>
-          Number.isInteger(year) &&
-          year >= 1900 &&
-          year <= 2100
+      new Set(
+        (body.years ?? [])
+          .map(Number)
+          .filter(
+            (year) =>
+              Number.isInteger(year) &&
+              year >= 1900 &&
+              year <= 2100
+          )
       )
-  )
-).sort(
-  (a, b) => a - b
-);
+    ).sort(
+      (a, b) => a - b
+    );
 
     if (
       years.length === 0
@@ -136,6 +230,9 @@ export async function POST(
       );
     }
 
+    /*
+     * 考试时间
+     */
     const durationMinutes =
       Math.floor(
         Number(
@@ -162,6 +259,9 @@ export async function POST(
       );
     }
 
+    /*
+     * 题量
+     */
     const requestedCounts: Record<
       QuestionType,
       number
@@ -176,13 +276,15 @@ export async function POST(
           )
         ),
 
-      JUDGMENT: Math.floor(
-        Number(
-          body
-            .questionCounts
-            ?.JUDGMENT ?? 0
-        )
-      ),
+      JUDGMENT:
+        Math.floor(
+          Number(
+            body
+              .questionCounts
+              ?.JUDGMENT ??
+              0
+          )
+        ),
 
       SHORT_ANSWER:
         Math.floor(
@@ -194,13 +296,15 @@ export async function POST(
           )
         ),
 
-      ESSAY: Math.floor(
-        Number(
-          body
-            .questionCounts
-            ?.ESSAY ?? 0
-        )
-      ),
+      ESSAY:
+        Math.floor(
+          Number(
+            body
+              .questionCounts
+              ?.ESSAY ??
+              0
+          )
+        ),
     };
 
     for (
@@ -210,9 +314,7 @@ export async function POST(
         requestedCounts[type];
 
       if (
-        !Number.isFinite(
-          count
-        ) ||
+        !Number.isFinite(count) ||
         count < 0 ||
         count > 100
       ) {
@@ -250,7 +352,10 @@ export async function POST(
       );
     }
 
-    const candidates =
+    /*
+     * 读取普通题库
+     */
+    const rawCandidates =
       await db.question.findMany(
         {
           where: {
@@ -282,6 +387,18 @@ export async function POST(
         }
       );
 
+    /*
+     * 第一层去重：
+     * 不同年份重复题，只留下一个。
+     */
+    const candidates =
+      dedupeQuestions(
+        rawCandidates
+      );
+
+    /*
+     * 按题型分组
+     */
     const grouped: Record<
       QuestionType,
       typeof candidates
@@ -306,6 +423,9 @@ export async function POST(
       }
     }
 
+    /*
+     * 去重后的题量检查
+     */
     const shortages: Array<{
       type: QuestionType;
       name: string;
@@ -342,7 +462,7 @@ export async function POST(
         shortages
           .map(
             (item) =>
-              `${item.name}需要${item.required}题，当前只有${item.available}题`
+              `${item.name}需要${item.required}题，跨年份去重后只有${item.available}题`
           )
           .join("；");
 
@@ -359,16 +479,201 @@ export async function POST(
       );
     }
 
-    const selectedQuestions: typeof candidates =
-      [];
+    /*
+     * ========================================
+     * 读取用户未掌握的单选错题
+     * ========================================
+     */
+    const wrongQuestionRows =
+      requestedCounts
+        .SINGLE_CHOICE > 0
+        ? await db.wrongQuestion.findMany(
+            {
+              where: {
+                userId:
+                  user.id,
 
-    const shouldShuffleQuestions =
-      body.shuffleQuestions !==
-      false;
+                mastered:
+                  false,
+
+                question: {
+                  deletedAt:
+                    null,
+
+                  isActive:
+                    true,
+
+                  reviewStatus:
+                    "APPROVED",
+
+                  type:
+                    "SINGLE_CHOICE",
+
+                  year: {
+                    in: years,
+                  },
+                },
+              },
+
+              include: {
+                question: true,
+              },
+
+              orderBy: [
+                {
+                  wrongCount:
+                    "desc",
+                },
+                {
+                  lastWrongAt:
+                    "desc",
+                },
+              ],
+            }
+          )
+        : [];
+
+    /*
+     * 错题也要跨年份去重
+     */
+    const uniqueWrongQuestions =
+      dedupeQuestions(
+        wrongQuestionRows.map(
+          (item) =>
+            item.question
+        )
+      );
+
+    /*
+     * 单选题约 25% 使用错题。
+     *
+     * 例如：
+     * 40题 -> 10道
+     * 35题 -> 9道
+     * 20题 -> 5道
+     * 10题 -> 3道
+     *
+     * 如果没有错题，则正常随机。
+     */
+    const singleChoiceCount =
+      requestedCounts
+        .SINGLE_CHOICE;
+
+    const wrongQuestionTarget =
+      singleChoiceCount > 0
+        ? Math.max(
+            1,
+            Math.ceil(
+              singleChoiceCount *
+                0.25
+            )
+          )
+        : 0;
+
+    const wrongQuestionsToUse =
+      shuffleArray(
+        uniqueWrongQuestions
+      ).slice(
+        0,
+        Math.min(
+          wrongQuestionTarget,
+          uniqueWrongQuestions.length,
+          singleChoiceCount
+        )
+      );
+
+    /*
+     * 已选择错题的唯一键
+     */
+    const usedQuestionKeys =
+      new Set<string>();
 
     for (
-      const type of QUESTION_TYPES
+      const question of wrongQuestionsToUse
     ) {
+      usedQuestionKeys.add(
+        getQuestionKey(
+          question
+        )
+      );
+    }
+
+    /*
+     * 最终选中的题目
+     */
+    const selectedByType: Record<
+      QuestionType,
+      typeof candidates
+    > = {
+      SINGLE_CHOICE: [],
+      JUDGMENT: [],
+      SHORT_ANSWER: [],
+      ESSAY: [],
+    };
+
+    /*
+     * ========================================
+     * 单选题：
+     * 先加入错题，再补普通题
+     * ========================================
+     */
+    selectedByType.SINGLE_CHOICE.push(
+      ...wrongQuestionsToUse
+    );
+
+    const remainingSingleCount =
+      singleChoiceCount -
+      selectedByType
+        .SINGLE_CHOICE
+        .length;
+
+    if (
+      remainingSingleCount > 0
+    ) {
+      const normalChoicePool =
+        shuffleArray(
+          grouped.SINGLE_CHOICE.filter(
+            (question) =>
+              !usedQuestionKeys.has(
+                getQuestionKey(
+                  question
+                )
+              )
+          )
+        );
+
+      const additionalChoices =
+        normalChoicePool.slice(
+          0,
+          remainingSingleCount
+        );
+
+      selectedByType.SINGLE_CHOICE.push(
+        ...additionalChoices
+      );
+
+      for (
+        const question of additionalChoices
+      ) {
+        usedQuestionKeys.add(
+          getQuestionKey(
+            question
+          )
+        );
+      }
+    }
+
+    /*
+     * ========================================
+     * 其他题型正常随机，
+     * 但依然去重
+     * ========================================
+     */
+    for (const type of [
+      "JUDGMENT",
+      "SHORT_ANSWER",
+      "ESSAY",
+    ] as const) {
       const required =
         requestedCounts[type];
 
@@ -378,68 +683,191 @@ export async function POST(
         continue;
       }
 
-      let pool = [
-        ...grouped[type],
-      ];
+      const pool =
+        shuffleArray(
+          grouped[type].filter(
+            (question) =>
+              !usedQuestionKeys.has(
+                getQuestionKey(
+                  question
+                )
+              )
+          )
+        );
 
-      pool =
-        shuffleArray(pool);
-
-      let selected =
+      const selected =
         pool.slice(
           0,
           required
         );
 
-      if (
-        !shouldShuffleQuestions
+      selectedByType[
+        type
+      ].push(...selected);
+
+      for (
+        const question of selected
       ) {
-        selected =
-          selected.sort(
-            (a, b) => {
-              const yearA =
-                a.year ?? 0;
-
-              const yearB =
-                b.year ?? 0;
-
-              if (
-                yearA !==
-                yearB
-              ) {
-                return (
-                  yearA -
-                  yearB
-                );
-              }
-
-              const numberA =
-                Number(
-                  a.originalQuestionNumber ??
-                    0
-                );
-
-              const numberB =
-                Number(
-                  b.originalQuestionNumber ??
-                    0
-                );
-
-              return (
-                numberA -
-                numberB
-              );
-            }
-          );
+        usedQuestionKeys.add(
+          getQuestionKey(
+            question
+          )
+        );
       }
+    }
 
-      selectedQuestions.push(
-        ...selected
+    /*
+     * ========================================
+     * 最后再次检查实际题量
+     * ========================================
+     */
+    const finalShortages: string[] =
+      [];
+
+    for (
+      const type of QUESTION_TYPES
+    ) {
+      if (
+        selectedByType[type]
+          .length <
+        requestedCounts[type]
+      ) {
+        finalShortages.push(
+          `${TYPE_NAMES[type]}需要${requestedCounts[type]}题，实际只能生成${selectedByType[type].length}题`
+        );
+      }
+    }
+
+    if (
+      finalShortages.length >
+      0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "去重后题量不足",
+          message:
+            finalShortages.join(
+              "；"
+            ),
+        },
+        {
+          status: 400,
+        }
       );
     }
 
+    /*
+     * ========================================
+     * 题目排序
+     * ========================================
+     */
+    const shouldShuffleQuestions =
+      body.shuffleQuestions !==
+      false;
+
+    const selectedQuestions:
+      typeof candidates = [];
+
+    for (
+      const type of QUESTION_TYPES
+    ) {
+      let questions = [
+        ...selectedByType[type],
+      ];
+
+      if (
+        shouldShuffleQuestions
+      ) {
+        /*
+         * 每个题型内部打乱
+         */
+        questions =
+          shuffleArray(
+            questions
+          );
+      } else {
+        /*
+         * 不打乱时：
+         * 按年份 + 原题号排列
+         */
+        questions.sort(
+          (a, b) => {
+            const yearA =
+              a.year ?? 0;
+
+            const yearB =
+              b.year ?? 0;
+
+            if (
+              yearA !== yearB
+            ) {
+              return (
+                yearA -
+                yearB
+              );
+            }
+
+            const numberA =
+              Number(
+                a.originalQuestionNumber ??
+                  0
+              );
+
+            const numberB =
+              Number(
+                b.originalQuestionNumber ??
+                  0
+              );
+
+            return (
+              numberA -
+              numberB
+            );
+          }
+        );
+      }
+
+      /*
+       * 保持：
+       * 单选 → 辨析 → 简答 → 论述
+       */
+      selectedQuestions.push(
+        ...questions
+      );
+    }
+
+    /*
+     * 最后一层保险：
+     * 确保整张卷没有重复题。
+     */
+    const finalQuestions =
+      dedupeQuestions(
+        selectedQuestions
+      );
+
+    if (
+      finalQuestions.length !==
+      selectedQuestions.length
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "检测到重复题",
+          message:
+            "系统在最终组卷时检测到重复题，请重新生成。",
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    /*
+     * 总分
+     */
     const totalScore =
-      selectedQuestions.reduce(
+      finalQuestions.reduce(
         (
           sum,
           question
@@ -451,6 +879,9 @@ export async function POST(
         0
       );
 
+    /*
+     * 标题
+     */
     const title =
       years.length === 1
         ? `${years[0]}年随机模拟卷`
@@ -460,6 +891,11 @@ export async function POST(
             ]
           }年随机模拟卷`;
 
+    /*
+     * ========================================
+     * 保存试卷
+     * ========================================
+     */
     const exam =
       await db.$transaction(
         async (tx) => {
@@ -477,7 +913,7 @@ export async function POST(
                   durationMinutes,
 
                   questionCount:
-                    selectedQuestions.length,
+                    finalQuestions.length,
 
                   generationConfig:
                     {
@@ -492,6 +928,20 @@ export async function POST(
                       shuffleOptions:
                         body.shuffleOptions !==
                         false,
+
+                      /*
+                       * 新增记录
+                       */
+                      deduplicateQuestions:
+                        true,
+
+                      wrongQuestionRatio:
+                        0.25,
+
+                      wrongQuestionTarget,
+
+                      wrongQuestionIncluded:
+                        wrongQuestionsToUse.length,
                     } as Prisma.InputJsonValue,
 
                   status:
@@ -501,7 +951,7 @@ export async function POST(
             );
 
           const examQuestions =
-            selectedQuestions.map(
+            finalQuestions.map(
               (
                 question,
                 index
@@ -599,7 +1049,9 @@ export async function POST(
     return NextResponse.json(
       {
         id: exam.id,
-        examId: exam.id,
+
+        examId:
+          exam.id,
 
         title:
           exam.title,
@@ -614,6 +1066,12 @@ export async function POST(
 
         durationMinutes:
           exam.durationMinutes,
+
+        /*
+         * 方便测试时确认错题混入数量
+         */
+        wrongQuestionIncluded:
+          wrongQuestionsToUse.length,
       },
       {
         status: 201,
