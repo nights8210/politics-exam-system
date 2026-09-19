@@ -1,11 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
+
 import {
   BarChart3,
   BookOpenCheck,
   CircleUserRound,
+  FileQuestion,
   FileUp,
   History,
   LayoutDashboard,
@@ -14,37 +20,102 @@ import {
   Settings,
   X,
 } from "lucide-react";
-import { useState } from "react";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { cn } from "@/lib/utils";
+
+import {
+  useState,
+} from "react";
+
+import {
+  createSupabaseBrowserClient,
+} from "@/lib/supabase/client";
+
+import {
+  cn,
+} from "@/lib/utils";
 
 const nav = [
-  ["/dashboard", "学习概览", LayoutDashboard],
-  ["/questions", "题库管理", BookOpenCheck],
-  ["/imports", "PDF 导入", FileUp],
-  ["/attempts", "考试记录", History],
-  ["/stats", "学习统计", BarChart3],
-  ["/settings", "设置", Settings],
+  [
+    "/dashboard",
+    "学习概览",
+    LayoutDashboard,
+  ],
+
+  [
+    "/questions",
+    "题库管理",
+    BookOpenCheck,
+  ],
+
+  [
+    "/imports",
+    "PDF 导入",
+    FileUp,
+  ],
+
+  [
+    "/attempts",
+    "考试记录",
+    History,
+  ],
+
+  [
+    "/wrong-questions",
+    "错题本",
+    FileQuestion,
+  ],
+
+  [
+    "/stats",
+    "学习统计",
+    BarChart3,
+  ],
+
+  [
+    "/settings",
+    "设置",
+    Settings,
+  ],
 ] as const;
 
 export function AppShell({
   children,
   user,
 }: {
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
+
   user: {
-    name: string | null;
-    email: string;
-    role: string;
+    name:
+      string | null;
+
+    email:
+      string;
+
+    role:
+      string;
   };
 }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const pathname =
+    usePathname();
+
+  const router =
+    useRouter();
+
+  const [
+    open,
+    setOpen,
+  ] =
+    useState(false);
 
   async function signOut() {
-    await createSupabaseBrowserClient().auth.signOut();
-    router.replace("/login");
+    await createSupabaseBrowserClient()
+      .auth
+      .signOut();
+
+    router.replace(
+      "/login"
+    );
+
     router.refresh();
   }
 
@@ -56,51 +127,97 @@ export function AppShell({
         </span>
 
         <div>
-          <p className="font-semibold">政治考试系统</p>
-          <p className="text-xs text-slate-400">成人高考题库</p>
+          <p className="font-semibold">
+            政治考试系统
+          </p>
+
+          <p className="text-xs text-slate-400">
+            成人高考题库
+          </p>
         </div>
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
-        {nav.map(([href, label, Icon]) => (
-          <Link
-            key={href}
-            href={href}
-            prefetch={false}
-            onClick={() => setOpen(false)}
-            className={cn(
-              "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition",
-              pathname.startsWith(href)
-                ? "bg-white/12 text-white"
-                : "text-slate-300 hover:bg-white/7 hover:text-white"
-            )}
-          >
-            <Icon size={19} />
-            {label}
-          </Link>
-        ))}
+        {nav.map(
+          ([
+            href,
+            label,
+            Icon,
+          ]) => (
+            <Link
+              key={
+                href
+              }
+              href={
+                href
+              }
+              prefetch={
+                false
+              }
+              onClick={() =>
+                setOpen(
+                  false
+                )
+              }
+              className={cn(
+                "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition",
+
+                pathname.startsWith(
+                  href
+                )
+                  ? "bg-white/12 text-white"
+                  : "text-slate-300 hover:bg-white/7 hover:text-white"
+              )}
+            >
+              <Icon
+                size={
+                  19
+                }
+              />
+
+              {
+                label
+              }
+            </Link>
+          )
+        )}
       </nav>
 
       <div className="border-t border-white/10 p-3">
         <div className="mb-2 flex items-center gap-3 rounded-xl px-3 py-2">
-          <CircleUserRound size={20} />
+          <CircleUserRound
+            size={
+              20
+            }
+          />
 
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">
-              {user.name || user.email}
+              {user.name ||
+                user.email}
             </p>
 
             <p className="text-xs text-slate-400">
-              {user.role === "ADMIN" ? "管理员" : "学习用户"}
+              {user.role ===
+              "ADMIN"
+                ? "管理员"
+                : "学习用户"}
             </p>
           </div>
         </div>
 
         <button
-          onClick={signOut}
+          onClick={
+            signOut
+          }
           className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-sm text-slate-300 hover:bg-white/7"
         >
-          <LogOut size={19} />
+          <LogOut
+            size={
+              19
+            }
+          />
+
           退出登录
         </button>
       </div>
@@ -110,7 +227,9 @@ export function AppShell({
   return (
     <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
       <aside className="desktop-only fixed inset-y-0 left-0 w-60 bg-[#14243a] text-white md:flex md:flex-col">
-        {sidebar}
+        {
+          sidebar
+        }
       </aside>
 
       {open && (
@@ -118,14 +237,24 @@ export function AppShell({
           <button
             className="absolute inset-0 bg-black/45"
             aria-label="关闭菜单"
-            onClick={() => setOpen(false)}
+            onClick={() =>
+              setOpen(
+                false
+              )
+            }
           />
 
           <aside className="relative flex w-[82%] max-w-xs flex-col bg-[#14243a] text-white">
-            {sidebar}
+            {
+              sidebar
+            }
 
             <button
-              onClick={() => setOpen(false)}
+              onClick={() =>
+                setOpen(
+                  false
+                )
+              }
               className="absolute right-3 top-4 rounded-lg p-2"
             >
               <X />
@@ -138,7 +267,11 @@ export function AppShell({
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:px-8">
           <button
             className="rounded-lg p-2 md:hidden"
-            onClick={() => setOpen(true)}
+            onClick={() =>
+              setOpen(
+                true
+              )
+            }
             aria-label="打开菜单"
           >
             <Menu />
@@ -150,7 +283,8 @@ export function AppShell({
 
           <div className="text-right">
             <p className="text-sm font-medium text-slate-800">
-              {user.name || "学习用户"}
+              {user.name ||
+                "学习用户"}
             </p>
 
             <p className="text-xs text-slate-500">
@@ -160,7 +294,9 @@ export function AppShell({
         </header>
 
         <main className="mx-auto max-w-[1400px] p-4 md:p-8">
-          {children}
+          {
+            children
+          }
         </main>
       </div>
     </div>
