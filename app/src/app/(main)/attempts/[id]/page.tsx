@@ -56,13 +56,19 @@ function getAnswerText(
 
   const record = asRecord(value);
 
-  if (record.value !== undefined) {
-    return getAnswerText(record.value);
+  /*
+   * 简答题、论述题常见：
+   * { reference: "完整参考答案" }
+   */
+  if (record.reference !== undefined) {
+    return getAnswerText(
+      record.reference
+    );
   }
 
-  if (record.correct !== undefined) {
+  if (record.value !== undefined) {
     return getAnswerText(
-      record.correct
+      record.value
     );
   }
 
@@ -75,6 +81,12 @@ function getAnswerText(
   if (record.text !== undefined) {
     return getAnswerText(
       record.text
+    );
+  }
+
+  if (record.correct !== undefined) {
+    return getAnswerText(
+      record.correct
     );
   }
 
@@ -94,7 +106,10 @@ function getChoiceAnswerText(
       answerValue
     ).trim();
 
-  if (!key || key === "—") {
+  if (
+    !key ||
+    key === "—"
+  ) {
     return "—";
   }
 
@@ -153,6 +168,71 @@ function getExplanation(
   }
 
   return "";
+}
+
+function getReference(
+  value: unknown
+): string {
+  const record =
+    asRecord(value);
+
+  const reference =
+    record.reference;
+
+  if (
+    typeof reference ===
+      "string" &&
+    reference.trim()
+  ) {
+    return reference.trim();
+  }
+
+  return "";
+}
+
+function getJudgmentConclusion(
+  value: unknown
+): string {
+  const record =
+    asRecord(value);
+
+  if (
+    record.correct !==
+    undefined
+  ) {
+    return getAnswerText(
+      record.correct
+    );
+  }
+
+  return "";
+}
+
+/*
+ * 判断两段内容是不是基本一样。
+ * 如果一样，就避免重复显示。
+ */
+function normalizeText(
+  value: string
+) {
+  return value
+    .replace(/\s+/g, "")
+    .replace(/[，。；：,.!?！？]/g, "")
+    .trim();
+}
+
+function isSameContent(
+  a: string,
+  b: string
+) {
+  if (!a || !b) {
+    return false;
+  }
+
+  const x = normalizeText(a);
+  const y = normalizeText(b);
+
+  return x === y;
 }
 
 export default async function AttemptResultPage({
@@ -309,7 +389,6 @@ export default async function AttemptResultPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      {/* 顶部成绩 */}
       <div className="card p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
@@ -347,7 +426,6 @@ export default async function AttemptResultPage({
         </div>
       </div>
 
-      {/* 数据卡片 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-5">
           <p className="text-sm text-slate-500">
@@ -355,9 +433,7 @@ export default async function AttemptResultPage({
           </p>
 
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {
-              objectiveAnswers.length
-            }
+            {objectiveAnswers.length}
           </p>
         </div>
 
@@ -387,14 +463,11 @@ export default async function AttemptResultPage({
           </p>
 
           <p className="mt-2 text-2xl font-bold text-slate-700">
-            {
-              unansweredChoiceCount
-            }
+            {unansweredChoiceCount}
           </p>
         </div>
       </div>
 
-      {/* 选择题成绩 */}
       <div className="card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -414,15 +487,13 @@ export default async function AttemptResultPage({
 
             <p className="text-xl font-bold text-slate-900">
               {objectiveScore} /{" "}
-              {
-                objectiveTotalScore
-              }
+              {objectiveTotalScore}
             </p>
           </div>
         </div>
       </div>
 
-      {/* 选择题详情 */}
+      {/* 选择题 */}
       <div className="space-y-4">
         {objectiveAnswers.map(
           (answer, index) => {
@@ -487,9 +558,7 @@ export default async function AttemptResultPage({
               >
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
-                    {getTypeName(
-                      type
-                    )}
+                    {getTypeName(type)}
                   </span>
 
                   {year && (
@@ -501,9 +570,7 @@ export default async function AttemptResultPage({
                   {originalNumber && (
                     <span className="text-slate-400">
                       原题第
-                      {
-                        originalNumber
-                      }
+                      {originalNumber}
                       题
                     </span>
                   )}
@@ -561,9 +628,7 @@ export default async function AttemptResultPage({
                     </p>
 
                     <p className="mt-2 font-semibold leading-6 text-emerald-700">
-                      {
-                        correctAnswer
-                      }
+                      {correctAnswer}
                     </p>
                   </div>
                 </div>
@@ -586,8 +651,7 @@ export default async function AttemptResultPage({
       </div>
 
       {/* 主观题 */}
-      {subjectiveAnswers.length >
-        0 && (
+      {subjectiveAnswers.length > 0 && (
         <div className="card p-6">
           <div className="mb-5">
             <h2 className="font-semibold text-slate-900">
@@ -640,14 +704,45 @@ export default async function AttemptResultPage({
                     answer.userAnswer
                   );
 
-                const correctAnswer =
-                  getAnswerText(
+                const reference =
+                  getReference(
+                    answer.correctAnswer
+                  );
+
+                const conclusion =
+                  getJudgmentConclusion(
                     answer.correctAnswer
                   );
 
                 const explanation =
                   getExplanation(
                     snapshot
+                  );
+
+                /*
+                 * 辨析题优先：
+                 * reference → explanation
+                 */
+                const judgmentDetail =
+                  reference ||
+                  explanation;
+
+                /*
+                 * 简答/论述优先：
+                 * reference → 普通答案 → explanation
+                 */
+                const mainReference =
+                  reference ||
+                  getAnswerText(
+                    answer.correctAnswer
+                  ) ||
+                  explanation;
+
+                const shouldShowExtraExplanation =
+                  explanation &&
+                  !isSameContent(
+                    mainReference,
+                    explanation
                   );
 
                 return (
@@ -657,9 +752,7 @@ export default async function AttemptResultPage({
                   >
                     <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
-                        {getTypeName(
-                          type
-                        )}
+                        {getTypeName(type)}
                       </span>
 
                       {year && (
@@ -671,9 +764,7 @@ export default async function AttemptResultPage({
                       {originalNumber && (
                         <span className="text-slate-400">
                           原题第
-                          {
-                            originalNumber
-                          }
+                          {originalNumber}
                           题
                         </span>
                       )}
@@ -694,36 +785,57 @@ export default async function AttemptResultPage({
                       </p>
                     </div>
 
-                    <div className="mt-4 rounded-xl bg-amber-50 p-4">
-                      <p className="text-xs font-medium text-amber-700">
-                        {type ===
-                        "JUDGMENT"
-                          ? "参考结论"
-                          : "参考答案"}
-                      </p>
+                    {type ===
+                    "JUDGMENT" ? (
+                      <>
+                        {conclusion && (
+                          <div className="mt-4 rounded-xl bg-amber-50 p-4">
+                            <p className="text-xs font-medium text-amber-700">
+                              参考结论
+                            </p>
 
-                      <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-7 text-amber-900">
-                        {
-                          correctAnswer
-                        }
-                      </p>
-                    </div>
+                            <p className="mt-2 font-semibold text-amber-900">
+                              {conclusion}
+                            </p>
+                          </div>
+                        )}
 
-                    {explanation && (
-                      <div className="mt-3 rounded-xl bg-blue-50 p-4">
-                        <p className="text-xs font-medium text-blue-700">
-                          {type ===
-                          "JUDGMENT"
-                            ? "辨析说明"
-                            : "答案解析"}
-                        </p>
+                        {judgmentDetail && (
+                          <div className="mt-3 rounded-xl bg-blue-50 p-4">
+                            <p className="text-xs font-medium text-blue-700">
+                              辨析说明
+                            </p>
 
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-900">
-                          {
-                            explanation
-                          }
-                        </p>
-                      </div>
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-900">
+                              {judgmentDetail}
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-4 rounded-xl bg-amber-50 p-4">
+                          <p className="text-xs font-medium text-amber-700">
+                            参考答案
+                          </p>
+
+                          <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-amber-900">
+                            {mainReference}
+                          </p>
+                        </div>
+
+                        {shouldShowExtraExplanation && (
+                          <div className="mt-3 rounded-xl bg-blue-50 p-4">
+                            <p className="text-xs font-medium text-blue-700">
+                              答案解析
+                            </p>
+
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-900">
+                              {explanation}
+                            </p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </section>
                 );
