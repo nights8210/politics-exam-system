@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -8,20 +9,74 @@ type SubmitBody = {
   durationSeconds?: number;
 };
 
-function readCorrectAnswer(value: Prisma.JsonValue) {
+function asRecord(
+  value: unknown
+): Record<string, unknown> {
   if (
     value &&
     typeof value === "object" &&
     !Array.isArray(value)
   ) {
-    const data = value as Record<string, unknown>;
+    return value as Record<string, unknown>;
+  }
 
-    if (typeof data.correct === "string") {
+  return {};
+}
+
+/*
+ * 读取正确答案
+ *
+ * 支持：
+ *
+ * { correct: "A" }
+ * { correct: true }
+ * "A"
+ */
+function readCorrectAnswer(
+  value: Prisma.JsonValue
+): string | boolean | null {
+  if (
+    typeof value === "string"
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const data =
+      value as Record<
+        string,
+        unknown
+      >;
+
+    if (
+      typeof data.correct ===
+      "string"
+    ) {
       return data.correct;
     }
 
-    if (typeof data.correct === "boolean") {
+    if (
+      typeof data.correct ===
+      "boolean"
+    ) {
       return data.correct;
+    }
+
+    if (
+      typeof data.answer ===
+      "string"
+    ) {
+      return data.answer;
     }
   }
 
@@ -31,51 +86,72 @@ function readCorrectAnswer(value: Prisma.JsonValue) {
 export async function POST(
   req: NextRequest,
   context: {
-    params: Promise<{ id: string }>;
+    params: Promise<{
+      id: string;
+    }>;
   }
 ) {
   try {
-    const user = await getCurrentUser();
+    const user =
+      await getCurrentUser();
 
     if (!user) {
       return NextResponse.json(
-        { error: "未登录" },
-        { status: 401 }
+        {
+          error: "未登录",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const { id: examId } = await context.params;
+    const { id: examId } =
+      await context.params;
 
-    const body = (await req.json()) as SubmitBody;
+    const body =
+      (await req.json()) as SubmitBody;
 
     const submittedAnswers =
       body.answers &&
-      typeof body.answers === "object"
+      typeof body.answers ===
+        "object"
         ? body.answers
         : {};
 
-    const exam = await db.exam.findFirst({
-      where: {
-        id: examId,
-        userId: user.id,
-      },
+    /*
+     * 查询试卷
+     */
+    const exam =
+      await db.exam.findFirst({
+        where: {
+          id: examId,
+          userId: user.id,
+        },
 
-      include: {
-        questions: {
-          orderBy: {
-            sortOrder: "asc",
+        include: {
+          questions: {
+            orderBy: {
+              sortOrder: "asc",
+            },
           },
         },
-      },
-    });
+      });
 
     if (!exam) {
       return NextResponse.json(
-        { error: "试卷不存在" },
-        { status: 404 }
+        {
+          error: "试卷不存在",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
+    /*
+     * 查询是否已有考试记录
+     */
     const existingAttempt =
       await db.examAttempt.findUnique({
         where: {
@@ -86,16 +162,25 @@ export async function POST(
         },
       });
 
+    /*
+     * 已经交过卷，不重复统计错题
+     */
     if (
       existingAttempt &&
-      existingAttempt.status === "SUBMITTED"
+      existingAttempt.status ===
+        "SUBMITTED"
     ) {
       return NextResponse.json(
         {
-          attemptId: existingAttempt.id,
-          message: "该试卷已经交卷",
+          attemptId:
+            existingAttempt.id,
+
+          message:
+            "该试卷已经交卷",
         },
-        { status: 200 }
+        {
+          status: 200,
+        }
       );
     }
 
@@ -103,353 +188,587 @@ export async function POST(
     let correctCount = 0;
     let wrongCount = 0;
     let unansweredCount = 0;
-    let pendingSubjectiveCount = 0;
+    let pendingSubjectiveCount =
+      0;
 
-    const answerRows = exam.questions.map(
-      (examQuestion) => {
-        const snapshot =
-          examQuestion.questionSnapshot &&
-          typeof examQuestion.questionSnapshot ===
-            "object" &&
-          !Array.isArray(
-            examQuestion.questionSnapshot
-          )
-            ? (examQuestion.questionSnapshot as Record<
-                string,
-                unknown
-              >)
-            : {};
+    /*
+     * 处理所有答案
+     */
+    const answerRows =
+      exam.questions.map(
+        (examQuestion) => {
+          const snapshot =
+            asRecord(
+              examQuestion
+                .questionSnapshot
+            );
 
-        const type =
-          typeof snapshot.type === "string"
-            ? snapshot.type
-            : "";
+          const type =
+            typeof snapshot.type ===
+            "string"
+              ? snapshot.type
+              : "";
 
-        const rawUserAnswer =
-          submittedAnswers[examQuestion.id];
+          const rawUserAnswer =
+            submittedAnswers[
+              examQuestion.id
+            ];
 
-        const userAnswer =
-          typeof rawUserAnswer === "string"
-            ? rawUserAnswer.trim()
-            : "";
+          const userAnswer =
+            typeof rawUserAnswer ===
+            "string"
+              ? rawUserAnswer.trim()
+              : "";
 
-        const maxScore = Number(
-          examQuestion.score
-        );
+          const maxScore =
+            Number(
+              examQuestion.score
+            );
 
-        const correctAnswer =
-          readCorrectAnswer(
-            examQuestion.correctAnswerSnapshot
-          );
+          const correctAnswer =
+            readCorrectAnswer(
+              examQuestion
+                .correctAnswerSnapshot
+            );
 
-        const isObjective =
-          type === "SINGLE_CHOICE" ||
-          type === "TRUE_FALSE";
+          /*
+           * 只有真正可以自动判分的题
+           */
+          const isAutoGraded =
+            type ===
+              "SINGLE_CHOICE" ||
+            type ===
+              "TRUE_FALSE";
 
-        let isCorrect: boolean | null = null;
-        let awardedScore = 0;
-        let gradingStatus = "PENDING";
+          let isCorrect:
+            | boolean
+            | null = null;
 
-        if (!userAnswer) {
-          unansweredCount += 1;
+          let awardedScore = 0;
 
-          if (isObjective) {
-            isCorrect = false;
-            gradingStatus = "GRADED";
-          } else {
-            pendingSubjectiveCount += 1;
+          let gradingStatus =
+            "PENDING";
+
+          /*
+           * 没有作答
+           */
+          if (!userAnswer) {
+            unansweredCount += 1;
+
+            if (isAutoGraded) {
+              isCorrect = false;
+              gradingStatus =
+                "GRADED";
+            } else {
+              pendingSubjectiveCount +=
+                1;
+            }
           }
-        } else if (isObjective) {
-          isCorrect =
-            String(userAnswer) ===
-            String(correctAnswer);
 
-          awardedScore = isCorrect
-            ? maxScore
-            : 0;
+          /*
+           * 自动判分
+           */
+          else if (
+            isAutoGraded
+          ) {
+            const normalizedUser =
+              String(
+                userAnswer
+              )
+                .trim()
+                .toUpperCase();
 
-          gradingStatus = "GRADED";
+            const normalizedCorrect =
+              correctAnswer ===
+              null
+                ? ""
+                : String(
+                    correctAnswer
+                  )
+                    .trim()
+                    .toUpperCase();
 
-          if (isCorrect) {
-            correctCount += 1;
-            objectiveScore += awardedScore;
-          } else {
-            wrongCount += 1;
+            isCorrect =
+              normalizedUser ===
+                normalizedCorrect &&
+              normalizedCorrect !==
+                "";
+
+            awardedScore =
+              isCorrect
+                ? maxScore
+                : 0;
+
+            gradingStatus =
+              "GRADED";
+
+            if (isCorrect) {
+              correctCount += 1;
+
+              objectiveScore +=
+                awardedScore;
+            } else {
+              wrongCount += 1;
+            }
           }
-        } else {
-          pendingSubjectiveCount += 1;
+
+          /*
+           * 主观题
+           */
+          else {
+            pendingSubjectiveCount +=
+              1;
+          }
+
+          return {
+            examQuestionId:
+              examQuestion.id,
+
+            questionId:
+              examQuestion
+                .questionId ??
+              null,
+
+            /*
+             * 保存题型，
+             * 后面判断是否进入错题本
+             */
+            type,
+
+            userAnswer: userAnswer
+              ? ({
+                  value:
+                    userAnswer,
+                } as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
+
+            correctAnswer:
+              examQuestion
+                .correctAnswerSnapshot as Prisma.InputJsonValue,
+
+            isCorrect,
+
+            awardedScore,
+
+            maxScore,
+
+            gradingStatus,
+          };
         }
-
-        return {
-          examQuestionId: examQuestion.id,
-          questionId:
-            examQuestion.questionId ?? null,
-
-          userAnswer: userAnswer
-            ? ({
-                value: userAnswer,
-              } as Prisma.InputJsonValue)
-            : Prisma.JsonNull,
-
-          correctAnswer:
-            examQuestion.correctAnswerSnapshot as Prisma.InputJsonValue,
-
-          isCorrect,
-          awardedScore,
-          maxScore,
-          gradingStatus,
-        };
-      }
-    );
-
-    const totalQuestions =
-      exam.questions.length;
+      );
 
     const gradedObjective =
-      correctCount + wrongCount;
+      correctCount +
+      wrongCount;
 
     const accuracy =
       gradedObjective > 0
-        ? (correctCount / gradedObjective) * 100
+        ? (correctCount /
+            gradedObjective) *
+          100
         : 0;
 
-    const attempt = await db.$transaction(
-      async (tx) => {
-        let attemptRecord;
+    /*
+     * =====================================
+     * 保存考试 + 答案 + 错题本
+     * =====================================
+     */
+    const attempt =
+      await db.$transaction(
+        async (tx) => {
+          let attemptRecord;
 
-        if (existingAttempt) {
-          await tx.attemptAnswer.deleteMany({
-            where: {
-              attemptId: existingAttempt.id,
-            },
-          });
+          /*
+           * 如果之前存在未完成记录
+           */
+          if (existingAttempt) {
+            await tx.attemptAnswer.deleteMany(
+              {
+                where: {
+                  attemptId:
+                    existingAttempt.id,
+                },
+              }
+            );
 
-          attemptRecord =
-            await tx.examAttempt.update({
-              where: {
-                id: existingAttempt.id,
-              },
+            attemptRecord =
+              await tx.examAttempt.update(
+                {
+                  where: {
+                    id:
+                      existingAttempt.id,
+                  },
 
-              data: {
-                submittedAt: new Date(),
-                durationSeconds:
-                  Math.max(
-                    0,
-                    Number(
-                      body.durationSeconds ?? 0
-                    )
-                  ) || null,
+                  data: {
+                    submittedAt:
+                      new Date(),
 
-                score: objectiveScore,
-                totalScore: exam.totalScore,
+                    durationSeconds:
+                      Math.max(
+                        0,
+                        Number(
+                          body.durationSeconds ??
+                            0
+                        )
+                      ) || null,
 
-                accuracy,
+                    score:
+                      objectiveScore,
 
-                correctCount,
-                wrongCount,
-                unansweredCount,
+                    totalScore:
+                      exam.totalScore,
 
-                status: "SUBMITTED",
+                    accuracy,
 
-                gradingStatus:
-                  pendingSubjectiveCount > 0
-                    ? "PARTIAL"
-                    : "GRADED",
-              },
-            });
-        } else {
-          attemptRecord =
-            await tx.examAttempt.create({
-              data: {
-                examId,
-                userId: user.id,
+                    correctCount,
 
-                submittedAt: new Date(),
+                    wrongCount,
 
-                durationSeconds:
-                  Math.max(
-                    0,
-                    Number(
-                      body.durationSeconds ?? 0
-                    )
-                  ) || null,
+                    unansweredCount,
 
-                score: objectiveScore,
+                    status:
+                      "SUBMITTED",
 
-                totalScore:
-                  exam.totalScore,
+                    gradingStatus:
+                      pendingSubjectiveCount >
+                      0
+                        ? "PARTIAL"
+                        : "GRADED",
+                  },
+                }
+              );
+          } else {
+            /*
+             * 新考试记录
+             */
+            attemptRecord =
+              await tx.examAttempt.create(
+                {
+                  data: {
+                    examId,
 
-                accuracy,
+                    userId:
+                      user.id,
 
-                correctCount,
-                wrongCount,
-                unansweredCount,
+                    submittedAt:
+                      new Date(),
 
-                status: "SUBMITTED",
+                    durationSeconds:
+                      Math.max(
+                        0,
+                        Number(
+                          body.durationSeconds ??
+                            0
+                        )
+                      ) || null,
 
-                gradingStatus:
-                  pendingSubjectiveCount > 0
-                    ? "PARTIAL"
-                    : "GRADED",
-              },
-            });
-        }
+                    score:
+                      objectiveScore,
 
-        if (answerRows.length > 0) {
-          await tx.attemptAnswer.createMany({
-            data: answerRows.map(
-              (answer) => ({
-                attemptId:
-                  attemptRecord.id,
+                    totalScore:
+                      exam.totalScore,
 
-                examQuestionId:
-                  answer.examQuestionId,
+                    accuracy,
 
-                questionId:
-                  answer.questionId,
+                    correctCount,
 
-                userAnswer:
-                  answer.userAnswer,
+                    wrongCount,
 
-                correctAnswer:
-                  answer.correctAnswer,
+                    unansweredCount,
 
-                isCorrect:
-                  answer.isCorrect,
+                    status:
+                      "SUBMITTED",
 
-                awardedScore:
-                  answer.awardedScore,
-
-                maxScore:
-                  answer.maxScore,
-
-                gradingStatus:
-                  answer.gradingStatus,
-              })
-            ),
-          });
-        }
-
-        /*
-         * 自动维护客观题错题本
-         */
-        for (const answer of answerRows) {
-          if (
-            !answer.questionId ||
-            answer.isCorrect === null
-          ) {
-            continue;
+                    gradingStatus:
+                      pendingSubjectiveCount >
+                      0
+                        ? "PARTIAL"
+                        : "GRADED",
+                  },
+                }
+              );
           }
 
-          if (answer.isCorrect) {
-            const existingWrong =
-              await tx.wrongQuestion.findUnique({
-                where: {
-                  userId_questionId: {
-                    userId: user.id,
-                    questionId:
-                      answer.questionId,
-                  },
-                },
-              });
+          /*
+           * 保存所有答题记录
+           */
+          if (
+            answerRows.length >
+            0
+          ) {
+            await tx.attemptAnswer.createMany(
+              {
+                data:
+                  answerRows.map(
+                    (
+                      answer
+                    ) => ({
+                      attemptId:
+                        attemptRecord.id,
 
-            if (existingWrong) {
+                      examQuestionId:
+                        answer.examQuestionId,
+
+                      questionId:
+                        answer.questionId,
+
+                      userAnswer:
+                        answer.userAnswer,
+
+                      correctAnswer:
+                        answer.correctAnswer,
+
+                      isCorrect:
+                        answer.isCorrect,
+
+                      awardedScore:
+                        answer.awardedScore,
+
+                      maxScore:
+                        answer.maxScore,
+
+                      gradingStatus:
+                        answer.gradingStatus,
+                    })
+                  ),
+              }
+            );
+          }
+
+          /*
+           * ===================================
+           * 错题本
+           *
+           * 重要规则：
+           * 只处理 SINGLE_CHOICE
+           * ===================================
+           */
+          for (
+            const answer of answerRows
+          ) {
+            /*
+             * 不是单选题：
+             * 完全跳过
+             */
+            if (
+              answer.type !==
+              "SINGLE_CHOICE"
+            ) {
+              continue;
+            }
+
+            /*
+             * 没有关联正式题库题目
+             */
+            if (
+              !answer.questionId
+            ) {
+              continue;
+            }
+
+            /*
+             * 无法判分
+             */
+            if (
+              answer.isCorrect ===
+              null
+            ) {
+              continue;
+            }
+
+            /*
+             * =================================
+             * 单选题答对
+             * =================================
+             */
+            if (
+              answer.isCorrect
+            ) {
+              const existingWrong =
+                await tx.wrongQuestion.findUnique(
+                  {
+                    where: {
+                      userId_questionId:
+                        {
+                          userId:
+                            user.id,
+
+                          questionId:
+                            answer.questionId,
+                        },
+                    },
+                  }
+                );
+
+              /*
+               * 如果以前从没答错过，
+               * 不创建错题记录。
+               */
+              if (
+                !existingWrong
+              ) {
+                continue;
+              }
+
               const nextConsecutive =
                 existingWrong.consecutiveCorrect +
                 1;
 
-              await tx.wrongQuestion.update({
-                where: {
-                  id: existingWrong.id,
-                },
+              /*
+               * 连续答对3次：
+               * 自动标记已掌握
+               */
+              const mastered =
+                nextConsecutive >=
+                3;
 
-                data: {
-                  correctCount: {
-                    increment: 1,
+              await tx.wrongQuestion.update(
+                {
+                  where: {
+                    id:
+                      existingWrong.id,
                   },
 
-                  consecutiveCorrect:
-                    nextConsecutive,
+                  data: {
+                    correctCount:
+                      {
+                        increment: 1,
+                      },
 
-                  lastCorrectAt:
-                    new Date(),
+                    consecutiveCorrect:
+                      nextConsecutive,
 
-                  mastered:
-                    nextConsecutive >= 3,
+                    lastCorrectAt:
+                      new Date(),
 
-                  masteredAt:
-                    nextConsecutive >= 3
-                      ? new Date()
-                      : existingWrong.masteredAt,
-                },
-              });
+                    mastered,
+
+                    masteredAt:
+                      mastered
+                        ? existingWrong.masteredAt ??
+                          new Date()
+                        : null,
+                  },
+                }
+              );
             }
-          } else {
-            await tx.wrongQuestion.upsert({
-              where: {
-                userId_questionId: {
-                  userId: user.id,
-                  questionId:
-                    answer.questionId,
-                },
-              },
 
-              update: {
-                wrongCount: {
-                  increment: 1,
-                },
+            /*
+             * =================================
+             * 单选题答错
+             * =================================
+             */
+            else {
+              await tx.wrongQuestion.upsert(
+                {
+                  where: {
+                    userId_questionId:
+                      {
+                        userId:
+                          user.id,
 
-                consecutiveCorrect: 0,
+                        questionId:
+                          answer.questionId,
+                      },
+                  },
 
-                lastWrongAt:
-                  new Date(),
+                  update: {
+                    wrongCount: {
+                      increment: 1,
+                    },
 
-                mastered: false,
-                masteredAt: null,
-              },
+                    /*
+                     * 一旦再次答错，
+                     * 连续正确清零
+                     */
+                    consecutiveCorrect:
+                      0,
 
-              create: {
-                userId: user.id,
+                    lastWrongAt:
+                      new Date(),
 
-                questionId:
-                  answer.questionId,
+                    mastered:
+                      false,
 
-                wrongCount: 1,
+                    masteredAt:
+                      null,
+                  },
 
-                correctCount: 0,
+                  create: {
+                    userId:
+                      user.id,
 
-                consecutiveCorrect: 0,
+                    questionId:
+                      answer.questionId,
 
-                lastWrongAt:
-                  new Date(),
+                    wrongCount:
+                      1,
 
-                mastered: false,
-              },
-            });
+                    correctCount:
+                      0,
+
+                    consecutiveCorrect:
+                      0,
+
+                    lastWrongAt:
+                      new Date(),
+
+                    mastered:
+                      false,
+                  },
+                }
+              );
+            }
           }
-        }
 
-        return attemptRecord;
+          return attemptRecord;
+        }
+      );
+
+    /*
+     * 统计本次实际新增/更新的单选错题
+     */
+    const choiceWrongCount =
+      answerRows.filter(
+        (answer) =>
+          answer.type ===
+            "SINGLE_CHOICE" &&
+          answer.isCorrect ===
+            false
+      ).length;
+
+    return NextResponse.json(
+      {
+        attemptId:
+          attempt.id,
+
+        score:
+          Number(
+            attempt.score
+          ),
+
+        totalScore:
+          Number(
+            attempt.totalScore
+          ),
+
+        correctCount,
+
+        wrongCount,
+
+        unansweredCount,
+
+        pendingSubjectiveCount,
+
+        /*
+         * 专门提供给前端/调试
+         */
+        choiceWrongCount,
+      },
+      {
+        status: 200,
       }
     );
-
-    return NextResponse.json({
-      attemptId: attempt.id,
-
-      score: Number(attempt.score),
-
-      totalScore: Number(
-        attempt.totalScore
-      ),
-
-      correctCount,
-      wrongCount,
-      unansweredCount,
-
-      pendingSubjectiveCount,
-
-      totalQuestions,
-    });
   } catch (error) {
     console.error(
       "Submit exam error:",
@@ -460,7 +779,9 @@ export async function POST(
       {
         error: "交卷失败",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
