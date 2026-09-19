@@ -1,488 +1,760 @@
-import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-import { getCurrentUser } from "@/lib/auth";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import {
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
+
+import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-const QUESTION_TYPES = [
-  "SINGLE_CHOICE",
-  "JUDGMENT",
-  "SHORT_ANSWER",
-  "ESSAY",
-] as const;
-
-const TYPE_NAMES: Record<string, string> = {
-  SINGLE_CHOICE: "单选题",
-  JUDGMENT: "辨析题",
-  SHORT_ANSWER: "简答题",
-  ESSAY: "论述题",
+export const metadata = {
+  title: "考试结果",
 };
 
-type QuestionType = (typeof QUESTION_TYPES)[number];
+function asRecord(
+  value: unknown
+): Record<string, unknown> {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return value as Record<string, unknown>;
+  }
 
-type GenerateExamBody = {
-  years?: number[];
+  return {};
+}
 
-  questionCounts?: {
-    SINGLE_CHOICE?: number;
-    JUDGMENT?: number;
-    SHORT_ANSWER?: number;
-    ESSAY?: number;
+function getAnswerText(
+  value: unknown
+): string {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "—";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "正确" : "错误";
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(getAnswerText)
+      .join("、");
+  }
+
+  const record = asRecord(value);
+
+  if (record.value !== undefined) {
+    return getAnswerText(record.value);
+  }
+
+  if (record.correct !== undefined) {
+    return getAnswerText(
+      record.correct
+    );
+  }
+
+  if (record.answer !== undefined) {
+    return getAnswerText(
+      record.answer
+    );
+  }
+
+  if (record.text !== undefined) {
+    return getAnswerText(
+      record.text
+    );
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "—";
+  }
+}
+
+function getChoiceAnswerText(
+  answerValue: unknown,
+  optionsValue: unknown
+): string {
+  const key =
+    getAnswerText(
+      answerValue
+    ).trim();
+
+  if (!key || key === "—") {
+    return "—";
+  }
+
+  const options =
+    asRecord(optionsValue);
+
+  const upperKey =
+    key.toUpperCase();
+
+  const text =
+    options[upperKey] ??
+    options[key];
+
+  if (typeof text === "string") {
+    return `${upperKey}. ${text}`;
+  }
+
+  return upperKey;
+}
+
+function getTypeName(
+  type: string
+) {
+  const names: Record<
+    string,
+    string
+  > = {
+    SINGLE_CHOICE: "单选题",
+    MULTIPLE_CHOICE: "多选题",
+    TRUE_FALSE: "判断题",
+    JUDGMENT: "辨析题",
+    SHORT_ANSWER: "简答题",
+    MATERIAL_ANALYSIS:
+      "材料分析题",
+    ESSAY: "论述题",
   };
 
-  durationMinutes?: number;
-  shuffleQuestions?: boolean;
-  shuffleOptions?: boolean;
-};
-
-function shuffleArray<T>(items: T[]): T[] {
-  const result = [...items];
-
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-
-    [result[i], result[j]] = [
-      result[j],
-      result[i],
-    ];
-  }
-
-  return result;
+  return names[type] || type;
 }
 
-function getOptionOrder(
-  options: Prisma.JsonValue | null,
-  shouldShuffle: boolean
-): string[] | null {
+function getExplanation(
+  snapshot: Record<
+    string,
+    unknown
+  >
+): string {
+  const explanation =
+    snapshot.explanation;
+
   if (
-    !options ||
-    typeof options !== "object" ||
-    Array.isArray(options)
+    typeof explanation ===
+      "string" &&
+    explanation.trim()
   ) {
-    return null;
+    return explanation.trim();
   }
 
-  const keys = Object.keys(
-    options as Record<string, unknown>
+  return "";
+}
+
+export default async function AttemptResultPage({
+  params,
+}: {
+  params: Promise<{
+    id: string;
+  }>;
+}) {
+  const user =
+    await requireUser();
+
+  const { id } =
+    await params;
+
+  const attempt =
+    await db.examAttempt.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+
+      include: {
+        exam: true,
+
+        answers: {
+          include: {
+            examQuestion: true,
+          },
+        },
+      },
+    });
+
+  if (!attempt) {
+    notFound();
+  }
+
+  const answers = [
+    ...attempt.answers,
+  ].sort(
+    (a, b) =>
+      a.examQuestion.sortOrder -
+      b.examQuestion.sortOrder
   );
 
-  if (keys.length === 0) {
-    return null;
-  }
+  const objectiveAnswers =
+    answers.filter(
+      (answer) => {
+        const snapshot =
+          asRecord(
+            answer.examQuestion
+              .questionSnapshot
+          );
 
-  return shouldShuffle
-    ? shuffleArray(keys)
-    : keys;
-}
+        const type =
+          typeof snapshot.type ===
+          "string"
+            ? snapshot.type
+            : "";
 
-export async function POST(req: NextRequest) {
-  try {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "未登录" },
-        { status: 401 }
-      );
-    }
-
-    const body =
-      (await req.json()) as GenerateExamBody;
-
-    const years = Array.from(
-      new Set(
-        (body.years ?? [])
-          .map(Number)
-          .filter(
-            (year) =>
-              Number.isInteger(year) &&
-              [2018, 2019, 2020].includes(year)
-          )
-      )
-    ).sort();
-
-    if (years.length === 0) {
-      return NextResponse.json(
-        {
-          error: "请至少选择一个年份",
-        },
-        { status: 400 }
-      );
-    }
-
-    const durationMinutes = Math.floor(
-      Number(body.durationMinutes ?? 150)
-    );
-
-    if (
-      !Number.isFinite(durationMinutes) ||
-      durationMinutes < 1 ||
-      durationMinutes > 600
-    ) {
-      return NextResponse.json(
-        {
-          error: "考试时长必须在1到600分钟之间",
-        },
-        { status: 400 }
-      );
-    }
-
-    const requestedCounts: Record<
-      QuestionType,
-      number
-    > = {
-      SINGLE_CHOICE: Math.floor(
-        Number(
-          body.questionCounts?.SINGLE_CHOICE ?? 0
-        )
-      ),
-
-      JUDGMENT: Math.floor(
-        Number(
-          body.questionCounts?.JUDGMENT ?? 0
-        )
-      ),
-
-      SHORT_ANSWER: Math.floor(
-        Number(
-          body.questionCounts?.SHORT_ANSWER ?? 0
-        )
-      ),
-
-      ESSAY: Math.floor(
-        Number(
-          body.questionCounts?.ESSAY ?? 0
-        )
-      ),
-    };
-
-    for (const type of QUESTION_TYPES) {
-      const count = requestedCounts[type];
-
-      if (
-        !Number.isFinite(count) ||
-        count < 0 ||
-        count > 100
-      ) {
-        return NextResponse.json(
-          {
-            error: `${TYPE_NAMES[type]}数量不正确`,
-          },
-          { status: 400 }
+        return (
+          type ===
+            "SINGLE_CHOICE" ||
+          type ===
+            "MULTIPLE_CHOICE" ||
+          type ===
+            "TRUE_FALSE"
         );
       }
-    }
+    );
 
-    const totalQuestionCount =
-      Object.values(requestedCounts).reduce(
-        (sum, count) => sum + count,
-        0
-      );
-
-    if (totalQuestionCount <= 0) {
-      return NextResponse.json(
-        {
-          error: "试卷至少需要一道题",
-        },
-        { status: 400 }
-      );
-    }
-
-    const candidates =
-      await db.question.findMany({
-        where: {
-          deletedAt: null,
-          isActive: true,
-          reviewStatus: "APPROVED",
-
-          year: {
-            in: years,
-          },
-
-          type: {
-            in: [...QUESTION_TYPES],
-          },
-        },
-
-        orderBy: [
-          {
-            year: "asc",
-          },
-          {
-            createdAt: "asc",
-          },
-        ],
-      });
-
-    const grouped: Record<
-      QuestionType,
-      typeof candidates
-    > = {
-      SINGLE_CHOICE: [],
-      JUDGMENT: [],
-      SHORT_ANSWER: [],
-      ESSAY: [],
-    };
-
-    for (const question of candidates) {
-      if (
-        QUESTION_TYPES.includes(
-          question.type as QuestionType
-        )
-      ) {
-        grouped[
-          question.type as QuestionType
-        ].push(question);
-      }
-    }
-
-    const shortages: Array<{
-      type: QuestionType;
-      name: string;
-      required: number;
-      available: number;
-    }> = [];
-
-    for (const type of QUESTION_TYPES) {
-      const required = requestedCounts[type];
-      const available = grouped[type].length;
-
-      if (required > available) {
-        shortages.push({
-          type,
-          name: TYPE_NAMES[type],
-          required,
-          available,
-        });
-      }
-    }
-
-    if (shortages.length > 0) {
-      const message = shortages
-        .map(
-          (item) =>
-            `${item.name}需要${item.required}题，当前只有${item.available}题`
-        )
-        .join("；");
-
-      return NextResponse.json(
-        {
-          error: "题库题量不足",
-          message,
-          shortages,
-        },
-        { status: 400 }
-      );
-    }
-
-    const selectedQuestions: typeof candidates =
-      [];
-
-    const shouldShuffleQuestions =
-      body.shuffleQuestions !== false;
-
-    for (const type of QUESTION_TYPES) {
-      const required = requestedCounts[type];
-
-      if (required === 0) {
-        continue;
-      }
-
-      let pool = [...grouped[type]];
-
-      /*
-       * 随机组卷：
-       * 每次都随机抽题。
-       */
-      pool = shuffleArray(pool);
-
-      let selected = pool.slice(0, required);
-
-      /*
-       * 如果关闭“随机打乱题目顺序”，
-       * 抽题仍然随机，但显示时按年份和原题号排列。
-       */
-      if (!shouldShuffleQuestions) {
-        selected = selected.sort((a, b) => {
-          const yearA = a.year ?? 0;
-          const yearB = b.year ?? 0;
-
-          if (yearA !== yearB) {
-            return yearA - yearB;
-          }
-
-          const numberA = Number(
-            a.originalQuestionNumber ?? 0
+  const subjectiveAnswers =
+    answers.filter(
+      (answer) => {
+        const snapshot =
+          asRecord(
+            answer.examQuestion
+              .questionSnapshot
           );
 
-          const numberB = Number(
-            b.originalQuestionNumber ?? 0
+        const type =
+          typeof snapshot.type ===
+          "string"
+            ? snapshot.type
+            : "";
+
+        return ![
+          "SINGLE_CHOICE",
+          "MULTIPLE_CHOICE",
+          "TRUE_FALSE",
+        ].includes(type);
+      }
+    );
+
+  const correctCount =
+    objectiveAnswers.filter(
+      (answer) =>
+        answer.isCorrect === true
+    ).length;
+
+  const wrongCount =
+    objectiveAnswers.filter(
+      (answer) =>
+        answer.isCorrect === false
+    ).length;
+
+  const choiceAnsweredCount =
+    objectiveAnswers.filter(
+      (answer) => {
+        const text =
+          getAnswerText(
+            answer.userAnswer
           );
 
-          return numberA - numberB;
-        });
+        return (
+          text !== "—" &&
+          text.trim() !== ""
+        );
       }
+    ).length;
 
-      /*
-       * 保留题型分区：
-       * 单选 → 辨析 → 简答 → 论述
-       */
-      selectedQuestions.push(...selected);
-    }
+  const unansweredChoiceCount =
+    objectiveAnswers.length -
+    choiceAnsweredCount;
 
-    const totalScore =
-      selectedQuestions.reduce(
-        (sum, question) =>
-          sum + Number(question.defaultScore),
-        0
-      );
+  const accuracy =
+    objectiveAnswers.length > 0
+      ? Math.round(
+          (correctCount /
+            objectiveAnswers.length) *
+            100
+        )
+      : 0;
 
-    const title =
-      years.length === 1
-        ? `${years[0]}年随机模拟卷`
-        : `${years[0]}—${
-            years[years.length - 1]
-          }年随机模拟卷`;
+  const objectiveScore =
+    objectiveAnswers.reduce(
+      (sum, answer) =>
+        sum +
+        Number(
+          answer.awardedScore
+        ),
+      0
+    );
 
-    const exam = await db.$transaction(
-      async (tx) => {
-        const createdExam =
-          await tx.exam.create({
-            data: {
-              userId: user.id,
+  const objectiveTotalScore =
+    objectiveAnswers.reduce(
+      (sum, answer) =>
+        sum +
+        Number(
+          answer.maxScore
+        ),
+      0
+    );
 
-              title,
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      {/* 顶部成绩 */}
+      <div className="card p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="text-sm text-slate-500">
+              考试结果
+            </p>
 
-              totalScore,
+            <h1 className="mt-1 text-2xl font-bold text-slate-900">
+              {attempt.exam.title}
+            </h1>
 
-              durationMinutes,
+            {attempt.submittedAt && (
+              <p className="mt-2 text-sm text-slate-500">
+                交卷时间：
+                {attempt.submittedAt.toLocaleString(
+                  "zh-CN",
+                  {
+                    timeZone:
+                      "Asia/Hong_Kong",
+                  }
+                )}
+              </p>
+            )}
+          </div>
 
-              questionCount:
-                selectedQuestions.length,
+          <div className="rounded-2xl bg-red-50 px-6 py-4 text-center">
+            <p className="text-xs text-red-500">
+              选择题正确率
+            </p>
 
-              generationConfig: {
-                years,
+            <p className="mt-1 text-3xl font-bold text-red-600">
+              {accuracy}%
+            </p>
+          </div>
+        </div>
+      </div>
 
-                questionCounts:
-                  requestedCounts,
+      {/* 数据卡片 */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="card p-5">
+          <p className="text-sm text-slate-500">
+            选择题
+          </p>
 
-                shuffleQuestions:
-                  shouldShuffleQuestions,
-
-                shuffleOptions:
-                  body.shuffleOptions !== false,
-              } as Prisma.InputJsonValue,
-
-              status: "READY",
-            },
-          });
-
-        const examQuestions =
-          selectedQuestions.map(
-            (question, index) => {
-              const optionsOrder =
-                getOptionOrder(
-                  question.options,
-                  body.shuffleOptions !== false
-                );
-
-              const questionSnapshot = {
-                id: question.id,
-
-                year: question.year,
-
-                originalQuestionNumber:
-                  question.originalQuestionNumber,
-
-                type: question.type,
-
-                stem: question.stem,
-
-                options:
-                  question.options ?? null,
-
-                chapter:
-                  question.chapter ?? null,
-
-                knowledgePoint:
-                  question.knowledgePoint ??
-                  null,
-
-                difficulty:
-                  question.difficulty,
-
-                explanation:
-                  question.explanation ??
-                  null,
-
-                sourceTitle:
-                  question.sourceTitle ??
-                  null,
-
-                sourcePdf:
-                  question.sourcePdf ?? null,
-              };
-
-              return {
-                examId: createdExam.id,
-
-                questionId: question.id,
-
-                questionSnapshot:
-                  questionSnapshot as Prisma.InputJsonValue,
-
-                optionsOrder:
-                  optionsOrder
-                    ? (optionsOrder as Prisma.InputJsonValue)
-                    : Prisma.DbNull,
-
-                correctAnswerSnapshot:
-                  question.answer as Prisma.InputJsonValue,
-
-                score:
-                  question.defaultScore,
-
-                sortOrder: index + 1,
-              };
+          <p className="mt-2 text-2xl font-bold text-slate-900">
+            {
+              objectiveAnswers.length
             }
-          );
+          </p>
+        </div>
 
-        await tx.examQuestion.createMany({
-          data: examQuestions,
-        });
+        <div className="card p-5">
+          <p className="text-sm text-slate-500">
+            答对
+          </p>
 
-        return createdExam;
-      }
-    );
+          <p className="mt-2 text-2xl font-bold text-emerald-600">
+            {correctCount}
+          </p>
+        </div>
 
-    return NextResponse.json(
-      {
-        id: exam.id,
-        examId: exam.id,
+        <div className="card p-5">
+          <p className="text-sm text-slate-500">
+            答错
+          </p>
 
-        title: exam.title,
+          <p className="mt-2 text-2xl font-bold text-red-600">
+            {wrongCount}
+          </p>
+        </div>
 
-        questionCount:
-          exam.questionCount,
+        <div className="card p-5">
+          <p className="text-sm text-slate-500">
+            未作答
+          </p>
 
-        totalScore:
-          Number(exam.totalScore),
+          <p className="mt-2 text-2xl font-bold text-slate-700">
+            {
+              unansweredChoiceCount
+            }
+          </p>
+        </div>
+      </div>
 
-        durationMinutes:
-          exam.durationMinutes,
-      },
-      { status: 201 }
-    );
-  } catch (error) {
-    console.error(
-      "Generate exam error:",
-      error
-    );
+      {/* 选择题成绩 */}
+      <div className="card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-slate-900">
+              选择题成绩
+            </h2>
 
-    return NextResponse.json(
-      {
-        error: "生成试卷失败",
-      },
-      { status: 500 }
-    );
-  }
+            <p className="mt-1 text-sm text-slate-500">
+              当前复习重点以选择题为主
+            </p>
+          </div>
+
+          <div className="text-right">
+            <p className="text-sm text-slate-500">
+              选择题得分
+            </p>
+
+            <p className="text-xl font-bold text-slate-900">
+              {objectiveScore} /{" "}
+              {
+                objectiveTotalScore
+              }
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 选择题详情 */}
+      <div className="space-y-4">
+        {objectiveAnswers.map(
+          (answer, index) => {
+            const snapshot =
+              asRecord(
+                answer.examQuestion
+                  .questionSnapshot
+              );
+
+            const type =
+              typeof snapshot.type ===
+              "string"
+                ? snapshot.type
+                : "";
+
+            const stem =
+              typeof snapshot.stem ===
+              "string"
+                ? snapshot.stem
+                : "题目";
+
+            const year =
+              typeof snapshot.year ===
+              "number"
+                ? snapshot.year
+                : null;
+
+            const originalNumber =
+              typeof snapshot.originalQuestionNumber ===
+              "string"
+                ? snapshot.originalQuestionNumber
+                : null;
+
+            const options =
+              snapshot.options;
+
+            const userAnswer =
+              getChoiceAnswerText(
+                answer.userAnswer,
+                options
+              );
+
+            const correctAnswer =
+              getChoiceAnswerText(
+                answer.correctAnswer,
+                options
+              );
+
+            const explanation =
+              getExplanation(
+                snapshot
+              );
+
+            return (
+              <section
+                key={answer.id}
+                className={`card border-l-4 p-5 ${
+                  answer.isCorrect
+                    ? "border-l-emerald-500"
+                    : "border-l-red-500"
+                }`}
+              >
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
+                    {getTypeName(
+                      type
+                    )}
+                  </span>
+
+                  {year && (
+                    <span className="text-slate-400">
+                      {year}年
+                    </span>
+                  )}
+
+                  {originalNumber && (
+                    <span className="text-slate-400">
+                      原题第
+                      {
+                        originalNumber
+                      }
+                      题
+                    </span>
+                  )}
+
+                  <span className="ml-auto">
+                    {answer.isCorrect ? (
+                      <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
+                        <CheckCircle2
+                          size={16}
+                        />
+                        正确
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                        <XCircle
+                          size={16}
+                        />
+                        错误
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                <p className="font-medium leading-7 text-slate-900">
+                  {index + 1}.{" "}
+                  {stem}
+                </p>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div
+                    className={`rounded-xl p-4 ${
+                      answer.isCorrect
+                        ? "bg-emerald-50"
+                        : "bg-red-50"
+                    }`}
+                  >
+                    <p className="text-xs text-slate-500">
+                      你的答案
+                    </p>
+
+                    <p
+                      className={`mt-2 font-semibold leading-6 ${
+                        answer.isCorrect
+                          ? "text-emerald-700"
+                          : "text-red-700"
+                      }`}
+                    >
+                      {userAnswer}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-emerald-50 p-4">
+                    <p className="text-xs text-emerald-600">
+                      正确答案
+                    </p>
+
+                    <p className="mt-2 font-semibold leading-6 text-emerald-700">
+                      {
+                        correctAnswer
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {explanation && (
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-medium text-slate-500">
+                      答案解析
+                    </p>
+
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {explanation}
+                    </p>
+                  </div>
+                )}
+              </section>
+            );
+          }
+        )}
+      </div>
+
+      {/* 主观题 */}
+      {subjectiveAnswers.length >
+        0 && (
+        <div className="card p-6">
+          <div className="mb-5">
+            <h2 className="font-semibold text-slate-900">
+              主观题参考
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              辨析题、简答题和论述题不计入当前选择题正确率，也不进入错题本。
+            </p>
+          </div>
+
+          <div className="space-y-5">
+            {subjectiveAnswers.map(
+              (
+                answer,
+                index
+              ) => {
+                const snapshot =
+                  asRecord(
+                    answer.examQuestion
+                      .questionSnapshot
+                  );
+
+                const type =
+                  typeof snapshot.type ===
+                  "string"
+                    ? snapshot.type
+                    : "";
+
+                const stem =
+                  typeof snapshot.stem ===
+                  "string"
+                    ? snapshot.stem
+                    : "题目";
+
+                const year =
+                  typeof snapshot.year ===
+                  "number"
+                    ? snapshot.year
+                    : null;
+
+                const originalNumber =
+                  typeof snapshot.originalQuestionNumber ===
+                  "string"
+                    ? snapshot.originalQuestionNumber
+                    : null;
+
+                const userAnswer =
+                  getAnswerText(
+                    answer.userAnswer
+                  );
+
+                const correctAnswer =
+                  getAnswerText(
+                    answer.correctAnswer
+                  );
+
+                const explanation =
+                  getExplanation(
+                    snapshot
+                  );
+
+                return (
+                  <section
+                    key={answer.id}
+                    className="rounded-xl border border-slate-200 p-5"
+                  >
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                        {getTypeName(
+                          type
+                        )}
+                      </span>
+
+                      {year && (
+                        <span className="text-slate-400">
+                          {year}年
+                        </span>
+                      )}
+
+                      {originalNumber && (
+                        <span className="text-slate-400">
+                          原题第
+                          {
+                            originalNumber
+                          }
+                          题
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="font-medium leading-7 text-slate-900">
+                      {index + 1}.{" "}
+                      {stem}
+                    </p>
+
+                    <div className="mt-5">
+                      <p className="text-xs text-slate-500">
+                        你的答案
+                      </p>
+
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                        {userAnswer}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 rounded-xl bg-amber-50 p-4">
+                      <p className="text-xs font-medium text-amber-700">
+                        {type ===
+                        "JUDGMENT"
+                          ? "参考结论"
+                          : "参考答案"}
+                      </p>
+
+                      <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-7 text-amber-900">
+                        {
+                          correctAnswer
+                        }
+                      </p>
+                    </div>
+
+                    {explanation && (
+                      <div className="mt-3 rounded-xl bg-blue-50 p-4">
+                        <p className="text-xs font-medium text-blue-700">
+                          {type ===
+                          "JUDGMENT"
+                            ? "辨析说明"
+                            : "答案解析"}
+                        </p>
+
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-900">
+                          {
+                            explanation
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </section>
+                );
+              }
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 pb-8">
+        <Link
+          href="/exams/generate"
+          className="btn-primary"
+        >
+          再做一套
+        </Link>
+
+        <Link
+          href="/attempts"
+          className="btn-secondary"
+        >
+          考试记录
+        </Link>
+
+        <Link
+          href="/questions"
+          className="btn-secondary"
+        >
+          返回题库
+        </Link>
+      </div>
+    </div>
+  );
 }
