@@ -26,7 +26,9 @@ function asRecord(
   return {};
 }
 
-function getAnswerText(value: unknown): string {
+function getAnswerText(
+  value: unknown
+): string {
   if (
     value === null ||
     value === undefined
@@ -71,7 +73,9 @@ function getAnswerText(value: unknown): string {
   }
 
   if (record.text !== undefined) {
-    return getAnswerText(record.text);
+    return getAnswerText(
+      record.text
+    );
   }
 
   try {
@@ -81,69 +85,39 @@ function getAnswerText(value: unknown): string {
   }
 }
 
-/*
- * 把 A / B / C / D
- * 转换成：
- * A. 具体选项内容
- */
 function getChoiceAnswerText(
   answerValue: unknown,
   optionsValue: unknown
 ): string {
-  const answerKey =
-    getAnswerText(answerValue).trim();
+  const key =
+    getAnswerText(
+      answerValue
+    ).trim();
 
-  if (
-    !answerKey ||
-    answerKey === "—"
-  ) {
+  if (!key || key === "—") {
     return "—";
   }
 
   const options =
     asRecord(optionsValue);
 
-  /*
-   * 普通结构：
-   * {
-   *   A: "...",
-   *   B: "...",
-   *   C: "...",
-   *   D: "..."
-   * }
-   */
-  const directText =
-    options[answerKey];
-
-  if (
-    typeof directText === "string"
-  ) {
-    return `${answerKey}. ${directText}`;
-  }
-
-  /*
-   * 兼容小写答案
-   */
   const upperKey =
-    answerKey.toUpperCase();
+    key.toUpperCase();
 
-  const upperText =
-    options[upperKey];
+  const text =
+    options[upperKey] ??
+    options[key];
 
-  if (
-    typeof upperText === "string"
-  ) {
-    return `${upperKey}. ${upperText}`;
+  if (typeof text === "string") {
+    return `${upperKey}. ${text}`;
   }
 
-  /*
-   * 如果找不到选项内容，
-   * 至少仍然显示 A/B/C/D
-   */
-  return answerKey;
+  return upperKey;
 }
 
-function getTypeName(type: string) {
+function getTypeName(
+  type: string
+) {
   const names: Record<
     string,
     string
@@ -161,6 +135,26 @@ function getTypeName(type: string) {
   return names[type] || type;
 }
 
+function getExplanation(
+  snapshot: Record<
+    string,
+    unknown
+  >
+): string {
+  const explanation =
+    snapshot.explanation;
+
+  if (
+    typeof explanation ===
+      "string" &&
+    explanation.trim()
+  ) {
+    return explanation.trim();
+  }
+
+  return "";
+}
+
 export default async function AttemptResultPage({
   params,
 }: {
@@ -168,9 +162,11 @@ export default async function AttemptResultPage({
     id: string;
   }>;
 }) {
-  const user = await requireUser();
+  const user =
+    await requireUser();
 
-  const { id } = await params;
+  const { id } =
+    await params;
 
   const attempt =
     await db.examAttempt.findFirst({
@@ -202,52 +198,54 @@ export default async function AttemptResultPage({
       b.examQuestion.sortOrder
   );
 
-  /*
-   * 客观题
-   */
   const objectiveAnswers =
-    answers.filter((answer) => {
-      const snapshot = asRecord(
-        answer.examQuestion
-          .questionSnapshot
-      );
+    answers.filter(
+      (answer) => {
+        const snapshot =
+          asRecord(
+            answer.examQuestion
+              .questionSnapshot
+          );
 
-      const type =
-        typeof snapshot.type ===
-        "string"
-          ? snapshot.type
-          : "";
+        const type =
+          typeof snapshot.type ===
+          "string"
+            ? snapshot.type
+            : "";
 
-      return (
-        type === "SINGLE_CHOICE" ||
-        type ===
-          "MULTIPLE_CHOICE" ||
-        type === "TRUE_FALSE"
-      );
-    });
+        return (
+          type ===
+            "SINGLE_CHOICE" ||
+          type ===
+            "MULTIPLE_CHOICE" ||
+          type ===
+            "TRUE_FALSE"
+        );
+      }
+    );
 
-  /*
-   * 主观题
-   */
   const subjectiveAnswers =
-    answers.filter((answer) => {
-      const snapshot = asRecord(
-        answer.examQuestion
-          .questionSnapshot
-      );
+    answers.filter(
+      (answer) => {
+        const snapshot =
+          asRecord(
+            answer.examQuestion
+              .questionSnapshot
+          );
 
-      const type =
-        typeof snapshot.type ===
-        "string"
-          ? snapshot.type
-          : "";
+        const type =
+          typeof snapshot.type ===
+          "string"
+            ? snapshot.type
+            : "";
 
-      return ![
-        "SINGLE_CHOICE",
-        "MULTIPLE_CHOICE",
-        "TRUE_FALSE",
-      ].includes(type);
-    });
+        return ![
+          "SINGLE_CHOICE",
+          "MULTIPLE_CHOICE",
+          "TRUE_FALSE",
+        ].includes(type);
+      }
+    );
 
   const correctCount =
     objectiveAnswers.filter(
@@ -303,13 +301,15 @@ export default async function AttemptResultPage({
     objectiveAnswers.reduce(
       (sum, answer) =>
         sum +
-        Number(answer.maxScore),
+        Number(
+          answer.maxScore
+        ),
       0
     );
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      {/* 顶部成绩概要 */}
+      {/* 顶部成绩 */}
       <div className="card p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
@@ -347,7 +347,7 @@ export default async function AttemptResultPage({
         </div>
       </div>
 
-      {/* 成绩统计 */}
+      {/* 数据卡片 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-5">
           <p className="text-sm text-slate-500">
@@ -355,7 +355,9 @@ export default async function AttemptResultPage({
           </p>
 
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {objectiveAnswers.length}
+            {
+              objectiveAnswers.length
+            }
           </p>
         </div>
 
@@ -385,12 +387,14 @@ export default async function AttemptResultPage({
           </p>
 
           <p className="mt-2 text-2xl font-bold text-slate-700">
-            {unansweredChoiceCount}
+            {
+              unansweredChoiceCount
+            }
           </p>
         </div>
       </div>
 
-      {/* 选择题分数 */}
+      {/* 选择题成绩 */}
       <div className="card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -410,7 +414,9 @@ export default async function AttemptResultPage({
 
             <p className="text-xl font-bold text-slate-900">
               {objectiveScore} /{" "}
-              {objectiveTotalScore}
+              {
+                objectiveTotalScore
+              }
             </p>
           </div>
         </div>
@@ -450,11 +456,6 @@ export default async function AttemptResultPage({
                 ? snapshot.originalQuestionNumber
                 : null;
 
-            /*
-             * 关键修改：
-             * 从 questionSnapshot.options
-             * 读取完整选项文字
-             */
             const options =
               snapshot.options;
 
@@ -470,6 +471,11 @@ export default async function AttemptResultPage({
                 options
               );
 
+            const explanation =
+              getExplanation(
+                snapshot
+              );
+
             return (
               <section
                 key={answer.id}
@@ -479,7 +485,6 @@ export default async function AttemptResultPage({
                     : "border-l-red-500"
                 }`}
               >
-                {/* 题目信息 */}
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
                     {getTypeName(
@@ -496,7 +501,9 @@ export default async function AttemptResultPage({
                   {originalNumber && (
                     <span className="text-slate-400">
                       原题第
-                      {originalNumber}
+                      {
+                        originalNumber
+                      }
                       题
                     </span>
                   )}
@@ -520,15 +527,12 @@ export default async function AttemptResultPage({
                   </span>
                 </div>
 
-                {/* 题干 */}
                 <p className="font-medium leading-7 text-slate-900">
                   {index + 1}.{" "}
                   {stem}
                 </p>
 
-                {/* 答案 */}
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {/* 我的答案 */}
                   <div
                     className={`rounded-xl p-4 ${
                       answer.isCorrect
@@ -536,13 +540,7 @@ export default async function AttemptResultPage({
                         : "bg-red-50"
                     }`}
                   >
-                    <p
-                      className={`text-xs ${
-                        answer.isCorrect
-                          ? "text-emerald-600"
-                          : "text-red-500"
-                      }`}
-                    >
+                    <p className="text-xs text-slate-500">
                       你的答案
                     </p>
 
@@ -557,17 +555,30 @@ export default async function AttemptResultPage({
                     </p>
                   </div>
 
-                  {/* 正确答案 */}
                   <div className="rounded-xl bg-emerald-50 p-4">
                     <p className="text-xs text-emerald-600">
                       正确答案
                     </p>
 
                     <p className="mt-2 font-semibold leading-6 text-emerald-700">
-                      {correctAnswer}
+                      {
+                        correctAnswer
+                      }
                     </p>
                   </div>
                 </div>
+
+                {explanation && (
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-medium text-slate-500">
+                      答案解析
+                    </p>
+
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {explanation}
+                    </p>
+                  </div>
+                )}
               </section>
             );
           }
@@ -590,7 +601,10 @@ export default async function AttemptResultPage({
 
           <div className="space-y-5">
             {subjectiveAnswers.map(
-              (answer) => {
+              (
+                answer,
+                index
+              ) => {
                 const snapshot =
                   asRecord(
                     answer.examQuestion
@@ -609,45 +623,109 @@ export default async function AttemptResultPage({
                     ? snapshot.stem
                     : "题目";
 
-                return (
-                  <div
-                    key={answer.id}
-                    className="rounded-xl border border-slate-200 p-4"
-                  >
-                    <span className="text-xs font-medium text-slate-500">
-                      {getTypeName(
-                        type
-                      )}
-                    </span>
+                const year =
+                  typeof snapshot.year ===
+                  "number"
+                    ? snapshot.year
+                    : null;
 
-                    <p className="mt-2 font-medium leading-7 text-slate-900">
+                const originalNumber =
+                  typeof snapshot.originalQuestionNumber ===
+                  "string"
+                    ? snapshot.originalQuestionNumber
+                    : null;
+
+                const userAnswer =
+                  getAnswerText(
+                    answer.userAnswer
+                  );
+
+                const correctAnswer =
+                  getAnswerText(
+                    answer.correctAnswer
+                  );
+
+                const explanation =
+                  getExplanation(
+                    snapshot
+                  );
+
+                return (
+                  <section
+                    key={answer.id}
+                    className="rounded-xl border border-slate-200 p-5"
+                  >
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                        {getTypeName(
+                          type
+                        )}
+                      </span>
+
+                      {year && (
+                        <span className="text-slate-400">
+                          {year}年
+                        </span>
+                      )}
+
+                      {originalNumber && (
+                        <span className="text-slate-400">
+                          原题第
+                          {
+                            originalNumber
+                          }
+                          题
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="font-medium leading-7 text-slate-900">
+                      {index + 1}.{" "}
                       {stem}
                     </p>
 
-                    <div className="mt-4">
+                    <div className="mt-5">
                       <p className="text-xs text-slate-500">
                         你的答案
                       </p>
 
-                      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                        {getAnswerText(
-                          answer.userAnswer
-                        )}
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                        {userAnswer}
                       </p>
                     </div>
 
                     <div className="mt-4 rounded-xl bg-amber-50 p-4">
                       <p className="text-xs font-medium text-amber-700">
-                        参考答案
+                        {type ===
+                        "JUDGMENT"
+                          ? "参考结论"
+                          : "参考答案"}
                       </p>
 
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-900">
-                        {getAnswerText(
-                          answer.correctAnswer
-                        )}
+                      <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-7 text-amber-900">
+                        {
+                          correctAnswer
+                        }
                       </p>
                     </div>
-                  </div>
+
+                    {explanation && (
+                      <div className="mt-3 rounded-xl bg-blue-50 p-4">
+                        <p className="text-xs font-medium text-blue-700">
+                          {type ===
+                          "JUDGMENT"
+                            ? "辨析说明"
+                            : "答案解析"}
+                        </p>
+
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-900">
+                          {
+                            explanation
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </section>
                 );
               }
             )}
@@ -655,7 +733,6 @@ export default async function AttemptResultPage({
         </div>
       )}
 
-      {/* 底部按钮 */}
       <div className="flex flex-wrap gap-3 pb-8">
         <Link
           href="/exams/generate"
