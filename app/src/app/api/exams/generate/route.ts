@@ -108,22 +108,19 @@ export async function POST(
       (await req.json()) as GenerateExamBody;
 
     const years = Array.from(
-      new Set(
-        (body.years ?? [])
-          .map(Number)
-          .filter(
-            (year) =>
-              Number.isInteger(
-                year
-              ) &&
-              [
-                2018,
-                2019,
-                2020,
-              ].includes(year)
-          )
+  new Set(
+    (body.years ?? [])
+      .map(Number)
+      .filter(
+        (year) =>
+          Number.isInteger(year) &&
+          year >= 1900 &&
+          year <= 2100
       )
-    ).sort();
+  )
+).sort(
+  (a, b) => a - b
+);
 
     if (
       years.length === 0
